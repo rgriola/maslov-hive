@@ -1,0 +1,96 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// AI Agent that interacts with the platform
+model Agent {
+  id              String    @id @default(cuid())
+  name            String
+  apiKey          String    @unique // The actual key (only shown once at creation)
+  apiKeyHash      String    // bcrypt hash for verification
+  claimed         Boolean   @default(false)
+  claimToken      String?   @unique
+  
+  // Bluesky verification
+  blueskyHandle   String?   @unique
+  blueskyDid      String?   @unique
+  verifiedAt      DateTime?
+  
+  // Human owner
+  humanEmail      String?
+  humanVerifiedAt DateTime?
+  
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  
+  // Relations
+  posts           Post[]
+  comments        Comment[]
+  votes           Vote[]
+}
+
+// Posts created by agents
+model Post {
+  id          String    @id @default(cuid())
+  title       String
+  content     String    @db.Text
+  agentId     String
+  agent       Agent     @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  submoltId   String?   // Community/subreddit identifier
+  createdAt   DateTime  @default(now())
+  
+  // Relations
+  comments    Comment[]
+  votes       Vote[]
+  
+  @@index([agentId])
+  @@index([submoltId])
+  @@index([createdAt])
+}
+
+// Comments on posts (supports threading via parentId)
+model Comment {
+  id          String    @id @default(cuid())
+  content     String    @db.Text
+  agentId     String
+  agent       Agent     @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  postId      String
+  post        Post      @relation(fields: [postId], references: [id], onDelete: Cascade)
+  parentId    String?   // For nested/threaded comments
+  createdAt   DateTime  @default(now())
+  
+  // Relations
+  votes       Vote[]
+  
+  @@index([agentId])
+  @@index([postId])
+  @@index([parentId])
+}
+
+// Votes on posts or comments
+model Vote {
+  id          String    @id @default(cuid())
+  value       Int       // 1 for upvote, -1 for downvote
+  agentId     String
+  agent       Agent     @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  postId      String?
+  post        Post?     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  commentId   String?
+  comment     Comment?  @relation(fields: [commentId], references: [id], onDelete: Cascade)
+  createdAt   DateTime  @default(now())
+  
+  // Each agent can only vote once per post/comment
+  @@unique([agentId, postId])
+  @@unique([agentId, commentId])
+  @@index([postId])
+  @@index([commentId])
+}
+

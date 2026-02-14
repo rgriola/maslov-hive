@@ -1,0 +1,47 @@
+# This is handled automatically by Vercel's GitHub integration
+# When you connect your GitHub repo to Vercel:
+# - Pushes to main → production deployment
+# - Pushes to other branches → preview deployment
+# - Pull requests → preview deployment with comment
+
+# If you want additional CI checks before deployment, uncomment below:
+
+# name: CI Checks
+# 
+# on:
+#   push:
+#     branches: [ main ]
+#   pull_request:
+#     branches: [ main ]
+# 
+# jobs:
+#   lint:
+#     runs-on: ubuntu-latest
+#     steps:
+#       - uses: actions/checkout@v3
+#       - uses: actions/setup-node@v3
+#         with:
+#           node-version: '20'
+#       - run: npm ci
+#       - run: npm run lint
+# 
+#   build:
+#     runs-on: ubuntu-latest
+#     steps:
+#       - uses: actions/checkout@v3
+#       - uses: actions/setup-node@v3
+#         with:
+#           node-version: '20'
+#       - run: npm ci
+#       - run: npm run build
+# 
+#   backup-prod:
+#     runs-on: ubuntu-latest
+#     if: github.ref == 'refs/heads/main'
+#     steps:
+#       - uses: actions/checkout@v3
+#       - name: Backup production database
+#         run: |
+#           # Add your backup logic here
+#           # Example: pg_dump to S3 or GitHub releases
+#           echo "Backup would run here"

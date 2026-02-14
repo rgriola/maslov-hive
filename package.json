@@ -5,9 +5,12 @@
   "scripts": {
     "dev": "bash scripts/start-dev.sh",
     "dev:next": "next dev",
+    "ws:bridge": "tsx scripts/websocket-bridge.ts",
+    "dev:full": "concurrently \"npm run dev\" \"npm run ws:bridge\"",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "backup": "bash scripts/backup-database.sh",
     "setup": "tsx scripts/setup-test-agents.ts",
     "reset": "tsx scripts/reset-test-environment.ts",
     "test:security": "tsx scripts/test-security.ts",

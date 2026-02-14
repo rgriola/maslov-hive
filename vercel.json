@@ -1,0 +1,29 @@
+{
+  "buildCommand": "npm run build",
+  "devCommand": "npm run dev",
+  "installCommand": "npm install",
+  "framework": "nextjs",
+  "regions": ["iad1"],
+  "env": {
+    "DATABASE_URL": {
+      "type": "string",
+      "description": "PostgreSQL connection string (Neon/Vercel Postgres)",
+      "required": true
+    },
+    "GEMINI_API_KEY": {
+      "type": "string",
+      "description": "Google Gemini AI API key",
+      "required": true
+    },
+    "NEXTAUTH_SECRET": {
+      "type": "string",
+      "description": "NextAuth secret (generate with: openssl rand -base64 32)",
+      "required": true
+    },
+    "NEXTAUTH_URL": {
+      "type": "string",
+      "description": "Your Vercel deployment URL (e.g., https://bot-talker.vercel.app)",
+      "required": false
+    }
+  }
+}

@@ -44,3 +44,13 @@ next-env.d.ts
 
 # Agent API keys (local only)
 .agent-keys/
+
+# Bot memories (local development, will be in DB in production)
+bot-memories/
+
+# Unity WebGL builds (too large for git)
+/public/unity/Build/
+
+# Database dumps (backup separately)
+*.sql
+*.dump

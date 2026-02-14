@@ -9,6 +9,7 @@
     "lint": "eslint",
     "setup": "tsx scripts/setup-test-agents.ts",
     "reset": "tsx scripts/reset-test-environment.ts",
+    "test:security": "tsx scripts/test-security.ts",
     "agent:tech": "tsx scripts/agent-simulator-1.ts",
     "agent:philo": "tsx scripts/agent-simulator-2.ts",
     "agent:art": "tsx scripts/agent-simulator-3.ts",

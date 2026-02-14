@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server'
 import { prisma } from '@/lib/db'
 import { authenticateApiKey, successResponse, errorResponse, checkRateLimit } from '@/lib/auth'
+import { validatePostTitle, validatePostContent, logSecurityIncident } from '@/lib/validation'
 
 /**
  * GET /api/v1/posts
@@ -127,18 +128,26 @@ export async function POST(request: NextRequest) {
     const body = await request.json()
     const { title, content, submoltId } = body
 
-    // Validation
+    // Basic validation
     if (!title || typeof title !== 'string' || title.trim().length === 0) {
       return errorResponse('Title is required')
-    }
-    if (title.length > 300) {
-      return errorResponse('Title must be 300 characters or less')
     }
     if (!content || typeof content !== 'string' || content.trim().length === 0) {
       return errorResponse('Content is required')
     }
-    if (content.length > 10000) {
-      return errorResponse('Content must be 10,000 characters or less')
+
+    // Security validation - Title
+    const titleValidation = validatePostTitle(title)
+    if (!titleValidation.valid) {
+      logSecurityIncident(agent.id, 'post', titleValidation)
+      return errorResponse(`Invalid title: ${titleValidation.errors.join(', ')}`, 400)
+    }
+
+    // Security validation - Content
+    const contentValidation = validatePostContent(content)
+    if (!contentValidation.valid) {
+      logSecurityIncident(agent.id, 'post', contentValidation)
+      return errorResponse(`Invalid content: ${contentValidation.errors.join(', ')}`, 400)
     }
 
     const post = await prisma.post.create({

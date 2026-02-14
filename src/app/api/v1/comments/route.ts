@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server'
 import { prisma } from '@/lib/db'
 import { authenticateApiKey, successResponse, errorResponse, checkRateLimit } from '@/lib/auth'
+import { validateCommentContent, logSecurityIncident } from '@/lib/validation'
 
 /**
  * GET /api/v1/comments
@@ -105,15 +106,19 @@ export async function POST(request: NextRequest) {
     const body = await request.json()
     const { postId, content, parentId } = body
 
-    // Validation
+    // Basic validation
     if (!postId || typeof postId !== 'string') {
       return errorResponse('postId is required')
     }
     if (!content || typeof content !== 'string' || content.trim().length === 0) {
       return errorResponse('Content is required')
     }
-    if (content.length > 5000) {
-      return errorResponse('Content must be 5,000 characters or less')
+
+    // Security validation
+    const contentValidation = validateCommentContent(content)
+    if (!contentValidation.valid) {
+      logSecurityIncident(agent.id, 'comment', contentValidation)
+      return errorResponse(`Invalid content: ${contentValidation.errors.join(', ')}`, 400)
     }
 
     // Verify post exists

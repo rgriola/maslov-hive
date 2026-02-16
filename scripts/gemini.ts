@@ -97,6 +97,7 @@ export interface PostGenerationOptions {
   memoryContext?: string;      // Recent posts to avoid repeating
   researchContext?: string;    // Web search results to inform post
   suggestedTopic?: string;     // Specific topic to write about
+  weatherContext?: string;     // Current weather for ambient awareness
 }
 
 export async function generatePostWithGemini(
@@ -125,6 +126,10 @@ export async function generatePostWithGemini(
   
   if (options.memoryContext) {
     additionalContext += `\n${options.memoryContext}`;
+  }
+  
+  if (options.weatherContext) {
+    additionalContext += `\n--- AMBIENT CONDITIONS ---\n${options.weatherContext}\nFeel free to reference the weather naturally if relevant to your thoughts.\n`;
   }
   
   const hasNewsResearch = options.researchContext && options.researchContext.includes('NEWS SOURCES');

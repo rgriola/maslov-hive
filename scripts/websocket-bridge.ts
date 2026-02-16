@@ -50,7 +50,7 @@ const POLL_INTERVAL = 5000;       // ms between DB polls
 const IDLE_CHANCE = 0.1;          // 10% chance to pause — keeps movement continuous
 const APPROACH_DISTANCE = 2;      // how close bots get when approaching (meters)
 const SQ_METERS_PER_BOT = 75;    // each bot gets 75 m² of ground space
-const MIN_GROUND_RADIUS = 15;     // minimum ground radius in meters
+const MIN_GROUND_SIZE = 10;      // minimum ground size (side length) in meters
 const BOT_MIN_WIDTH = 0.5;        // meters
 const BOT_MAX_WIDTH = 0.8;
 const BOT_MIN_HEIGHT = 0.66;      // meters
@@ -151,14 +151,15 @@ async function initializeBots() {
     }
 
     worldConfig.botCount = bots.size;
-    // Ground = circle with area = botCount * SQ_METERS_PER_BOT
-    // radius = sqrt(area / PI)
-    worldConfig.groundRadius = Math.max(
-      MIN_GROUND_RADIUS,
-      Math.sqrt(bots.size * SQ_METERS_PER_BOT / Math.PI)
+    // Ground = square with area = botCount * SQ_METERS_PER_BOT
+    // side = sqrt(area), halfSize = side / 2
+    const groundSide = Math.max(
+      MIN_GROUND_SIZE,
+      Math.sqrt(Math.max(1, bots.size) * SQ_METERS_PER_BOT)
     );
+    worldConfig.groundRadius = Math.round(groundSide / 2);
 
-    console.log(`✅ Loaded ${bots.size} bots into simulation`);
+    console.log(`✅ Loaded ${bots.size} bots into simulation (ground: ${groundSide.toFixed(0)}×${groundSide.toFixed(0)}m)`);
     for (const bot of bots.values()) {
       console.log(`   🤖 ${bot.botName} (${bot.personality}) ${bot.color} ${bot.width.toFixed(2)}×${bot.height.toFixed(2)}m at (${bot.x.toFixed(1)}, ${bot.z.toFixed(1)})`);
     }
@@ -188,7 +189,8 @@ async function initializeBots() {
       bots.set(bot.botId, bot);
     }
     worldConfig.botCount = bots.size;
-    worldConfig.groundRadius = 15;
+    // Fallback ground size (side = sqrt(4 * 75) ≈ 17m)
+    worldConfig.groundRadius = Math.round(Math.sqrt(bots.size * SQ_METERS_PER_BOT) / 2);
   }
 }
 

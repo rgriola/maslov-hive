@@ -39,7 +39,7 @@ export default function TestRSSPage() {
         }
         const xml = await response.text();
         setRawXml(xml);
-      } catch (proxyErr) {
+      } catch {
         setError(`CORS blocked. Run this in terminal instead:\ncurl "https://news.google.com/rss/search?q=${encodeURIComponent(query)}&hl=en-US&gl=US&ceid=US:en"`);
       }
     } finally {

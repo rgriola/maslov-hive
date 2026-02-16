@@ -318,7 +318,7 @@ export function injectCitationUrls(content: string, searchResults: SearchRespons
   // Find ***Source, Date*** patterns and inject URLs
   const citationPattern = /\*{3}([^*]+),\s*(\d{1,2}-\d{1,2}-\d{4})\*{3}/g;
   
-  return content.replace(citationPattern, (match, source, date) => {
+  return content.replace(citationPattern, (match, source) => {
     const sourceLower = source.trim().toLowerCase();
     
     // Try to find a matching URL

@@ -26,6 +26,11 @@ import {
   injectCitationUrls,
   SearchResponse
 } from './web-search';
+import { getWeather, getAirQuality, formatWeatherForPrompt, WeatherData } from './weather';
+
+// Weather cache (shared across all bots to avoid API spam)
+let weatherCache: { data: WeatherData | null; timestamp: number } = { data: null, timestamp: 0 };
+const WEATHER_CACHE_TTL = 10 * 60 * 1000; // 10 minutes
 
 interface AgentConfig {
   name: string;
@@ -45,13 +50,6 @@ interface AgentConfig {
 }
 
 // Local interfaces that don't conflict with Prisma types
-interface Pagination {
-  page: number;
-  limit: number;
-  total: number;
-  totalPages: number;
-}
-
 interface ApiResponse<T> {
   success: boolean;
   data?: T;
@@ -239,6 +237,38 @@ export class BotAgent {
       options.memoryContext = memoryContext;
     }
     
+    // Fetch weather with caching (shared across bots)
+    const now = Date.now();
+    if (!weatherCache.data || (now - weatherCache.timestamp) > WEATHER_CACHE_TTL) {
+      try {
+        // Default to NYC coordinates; in production, get from config or env
+        const lat = parseFloat(process.env.BOT_LATITUDE || '40.7128');
+        const lng = parseFloat(process.env.BOT_LONGITUDE || '-74.006');
+        const weather = await getWeather(lat, lng);
+        
+        // Fetch air quality and attach to weather
+        if (weather) {
+          const airQuality = await getAirQuality(lat, lng);
+          if (airQuality) {
+            weather.airQuality = airQuality;
+          }
+        }
+        
+        weatherCache = { data: weather, timestamp: now };
+        if (weather) {
+          const aqInfo = weather.airQuality ? `, AQI ${weather.airQuality.us_aqi}` : '';
+          this.log('🌤️', `Weather updated: ${weather.temperature}°F, ${weather.condition}${aqInfo}`);
+        }
+      } catch (error) {
+        this.log('⚠️', `Weather fetch failed: ${error}`);
+      }
+    }
+    
+    // Add weather context (50% chance to include it for variety)
+    if (weatherCache.data && Math.random() < 0.5) {
+      options.weatherContext = formatWeatherForPrompt(weatherCache.data);
+    }
+    
     // 40% chance to do research for informed posts
     if (Math.random() < 0.4) {
       try {
@@ -311,7 +341,9 @@ export class BotAgent {
     const personaDesc = `${this.config.personality.description}. Style: ${this.config.personality.style}.`;
 
     // Access nested agent properties safely
-    const authorName = (post as any).agent?.name || 'someone';
+    const authorName = typeof post === 'object' && post && 'agent' in post && typeof (post as { agent?: { name?: string } }).agent?.name === 'string'
+      ? (post as { agent?: { name?: string } }).agent!.name
+      : 'someone';
 
     return generateCommentWithGemini(
       this.config.name,
@@ -334,7 +366,7 @@ export class BotAgent {
 
     try {
       // Get IDs of comments we've already responded to
-      const memory = loadMemory(this.config.name);
+      // Removed unused 'memory' variable
       const respondedIds = getInteractedPostIds(this.config.name);
 
       const pendingReplies = await this.connector.getPendingReplies(this.config.name, respondedIds);
@@ -404,7 +436,9 @@ export class BotAgent {
       // Process a few posts
       for (const post of posts.slice(0, 5)) {
         // Skip own posts
-        const authorName = (post as any).agent?.name;
+        const authorName = typeof post === 'object' && post && 'agent' in post && typeof (post as { agent?: { name?: string } }).agent?.name === 'string'
+          ? (post as { agent?: { name?: string } }).agent!.name
+          : undefined;
         if (authorName === this.config.name) continue;
 
         // Maybe comment

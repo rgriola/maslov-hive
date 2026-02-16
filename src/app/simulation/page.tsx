@@ -4,6 +4,37 @@ import { useEffect, useRef, useCallback, useState, useMemo, ReactNode } from 're
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 
+// Weather types (inline to avoid Next.js server/client import issues)
+interface AirQualityData {
+  us_aqi: number;
+  european_aqi: number;
+  pm10: number;
+  pm2_5: number;
+  carbon_monoxide: number;
+  nitrogen_dioxide: number;
+  sulphur_dioxide: number;
+  ozone: number;
+  quality_label: string;
+}
+
+interface WeatherData {
+  temperature: number;
+  feelsLike: number;
+  condition: string;
+  weatherCode: number;
+  cloudCover: number;
+  precipitation: number;
+  humidity: number;
+  windSpeed: number;
+  isDay: boolean;
+  isRaining: boolean;
+  isSnowing: boolean;
+  isCloudy: boolean;
+  isFoggy: boolean;
+  isStormy: boolean;
+  airQuality?: AirQualityData;
+}
+
 // ─── Content Renderer (handles markdown-style links and citations) ───
 
 function renderContentWithLinks(content: string): ReactNode[] {
@@ -196,12 +227,18 @@ export default function SimulationPage() {
   const [postDetail, setPostDetail] = useState<PostDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [selectedBotInfo, setSelectedBotInfo] = useState<SelectedBotInfo | null>(null);
-  const [currentTime, setCurrentTime] = useState<Date>(new Date());
+  const [currentTime, setCurrentTime] = useState<Date | null>(null); // null until client mount
   const [location, setLocation] = useState<{ lat: number; lng: number } | null>(null);
+  const [weather, setWeather] = useState<WeatherData | null>(null);
+  const [showAirQuality, setShowAirQuality] = useState(false);
+  // Particle system refs for weather effects
+  const rainParticlesRef = useRef<THREE.Points | null>(null);
+  const cloudParticlesRef = useRef<THREE.Points | null>(null);
 
   // ─── Clock & Location ────────────────────────────────────────
   useEffect(() => {
-    // Update time every second
+    // Initialize time on client mount to avoid hydration mismatch
+    setCurrentTime(new Date());
     const timer = setInterval(() => setCurrentTime(new Date()), 1000);
     return () => clearInterval(timer);
   }, []);
@@ -216,6 +253,149 @@ export default function SimulationPage() {
       );
     }
   }, []);
+
+  // ─── Fetch Weather Data ────────────────────────────────────
+  useEffect(() => {
+    const fetchWeather = async (lat: number, lng: number) => {
+      try {
+        const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}&current=temperature_2m,apparent_temperature,weather_code,cloud_cover,precipitation,relative_humidity_2m,wind_speed_10m,is_day&temperature_unit=fahrenheit&wind_speed_unit=mph&precipitation_unit=mm`;
+        const response = await fetch(url);
+        if (!response.ok) return;
+        const data = await response.json();
+        const current = data.current;
+        
+        // WMO weather code interpretation
+        const weatherCode = current.weather_code;
+        const isRainCode = [51,53,55,56,57,61,63,65,66,67,80,81,82,95,96,99].includes(weatherCode);
+        const isSnowCode = [71,73,75,77,85,86].includes(weatherCode);
+        const isFogCode = [45,48].includes(weatherCode);
+        const isStormCode = [82,95,96,99].includes(weatherCode);
+        
+        const conditions: Record<number, string> = {
+          0: 'Clear', 1: 'Mainly clear', 2: 'Partly cloudy', 3: 'Overcast',
+          45: 'Foggy', 48: 'Rime fog', 51: 'Light drizzle', 53: 'Drizzle',
+          55: 'Heavy drizzle', 61: 'Light rain', 63: 'Rain', 65: 'Heavy rain',
+          71: 'Light snow', 73: 'Snow', 75: 'Heavy snow', 77: 'Snow grains',
+          80: 'Rain showers', 81: 'Rain showers', 82: 'Heavy showers',
+          85: 'Snow showers', 86: 'Heavy snow showers', 95: 'Thunderstorm',
+          96: 'Thunderstorm', 99: 'Severe thunderstorm'
+        };
+        
+        // Fetch air quality in parallel
+        let airQuality: AirQualityData | undefined;
+        try {
+          const aqUrl = `https://air-quality-api.open-meteo.com/v1/air-quality?latitude=${lat}&longitude=${lng}&current=us_aqi,european_aqi,pm10,pm2_5,carbon_monoxide,nitrogen_dioxide,sulphur_dioxide,ozone`;
+          const aqResponse = await fetch(aqUrl);
+          if (aqResponse.ok) {
+            const aqData = await aqResponse.json();
+            const aq = aqData.current;
+            const aqi = aq.us_aqi;
+            let quality_label = 'Unknown';
+            if (aqi <= 50) quality_label = 'Good';
+            else if (aqi <= 100) quality_label = 'Moderate';
+            else if (aqi <= 150) quality_label = 'Unhealthy for Sensitive Groups';
+            else if (aqi <= 200) quality_label = 'Unhealthy';
+            else if (aqi <= 300) quality_label = 'Very Unhealthy';
+            else quality_label = 'Hazardous';
+            
+            airQuality = {
+              us_aqi: Math.round(aq.us_aqi || 0),
+              european_aqi: Math.round(aq.european_aqi || 0),
+              pm10: Math.round(aq.pm10 * 10) / 10,
+              pm2_5: Math.round(aq.pm2_5 * 10) / 10,
+              carbon_monoxide: Math.round(aq.carbon_monoxide || 0),
+              nitrogen_dioxide: Math.round(aq.nitrogen_dioxide * 10) / 10,
+              sulphur_dioxide: Math.round(aq.sulphur_dioxide * 10) / 10,
+              ozone: Math.round(aq.ozone * 10) / 10,
+              quality_label,
+            };
+          }
+        } catch (aqError) {
+          console.error('Air quality fetch failed:', aqError);
+        }
+        
+        setWeather({
+          temperature: Math.round(current.temperature_2m),
+          feelsLike: Math.round(current.apparent_temperature),
+          condition: conditions[weatherCode] || 'Clear',
+          weatherCode,
+          cloudCover: current.cloud_cover,
+          precipitation: current.precipitation,
+          humidity: current.relative_humidity_2m,
+          windSpeed: Math.round(current.wind_speed_10m),
+          isDay: current.is_day === 1,
+          isRaining: isRainCode || current.precipitation > 0,
+          isSnowing: isSnowCode,
+          isCloudy: current.cloud_cover > 50,
+          isFoggy: isFogCode,
+          isStormy: isStormCode,
+          airQuality,
+        });
+      } catch (error) {
+        console.error('Weather fetch failed:', error);
+      }
+    };
+
+    // Fetch when location is available, then refresh every 10 minutes
+    const lat = location?.lat ?? 40.7128;
+    const lng = location?.lng ?? -74.006;
+    fetchWeather(lat, lng);
+    const interval = setInterval(() => fetchWeather(lat, lng), 10 * 60 * 1000);
+    return () => clearInterval(interval);
+  }, [location]);
+
+  // ─── Weather Helper: Get Emoji ────────────────────────────
+  const getWeatherEmoji = useCallback((w: WeatherData): string => {
+    if (w.isStormy) return '⛈️';
+    if (w.isSnowing) return '🌨️';
+    if (w.isRaining) return '🌧️';
+    if (w.isFoggy) return '🌫️';
+    if (!w.isDay) return w.isCloudy ? '☁️' : '🌙';
+    if (w.cloudCover > 80) return '☁️';
+    if (w.cloudCover > 40) return '⛅';
+    return '☀️';
+  }, []);
+
+  // ─── Air Quality Helper: Get AQI Color ────────────────────────
+  const getAQIColor = useCallback((aqi: number): string => {
+    if (aqi <= 50) return '#00e400';      // Green - Good
+    if (aqi <= 100) return '#ffff00';     // Yellow - Moderate
+    if (aqi <= 150) return '#ff7e00';     // Orange - Unhealthy for Sensitive
+    if (aqi <= 200) return '#ff0000';     // Red - Unhealthy
+    if (aqi <= 300) return '#8f3f97';     // Purple - Very Unhealthy
+    return '#7e0023';                      // Maroon - Hazardous
+  }, []);
+
+  // ─── Update Weather Visual Effects ────────────────────────
+  useEffect(() => {
+    const rain = rainParticlesRef.current;
+    const snow = cloudParticlesRef.current;
+    
+    if (rain) {
+      rain.visible = weather?.isRaining ?? false;
+      // Adjust rain opacity based on intensity
+      if (rain.material instanceof THREE.PointsMaterial && weather?.isRaining) {
+        const intensity = weather.precipitation > 5 ? 0.8 : weather.precipitation > 1 ? 0.6 : 0.4;
+        rain.material.opacity = intensity;
+      }
+    }
+    
+    if (snow) {
+      snow.visible = weather?.isSnowing ?? false;
+    }
+    
+    // Adjust fog for weather
+    const scene = sceneRef.current;
+    if (scene && scene.fog instanceof THREE.FogExp2) {
+      if (weather?.isFoggy) {
+        scene.fog.density = 0.035; // Dense fog
+      } else if (weather?.isRaining || weather?.isCloudy) {
+        scene.fog.density = 0.018; // Light fog/haze
+      } else {
+        scene.fog.density = 0.012; // Clear
+      }
+    }
+  }, [weather]);
 
   // ─── Sun Position Calculator ────────────────────────────────
   const calculateSunPosition = useCallback((date: Date, lat: number, lng: number) => {
@@ -245,7 +425,7 @@ export default function SimulationPage() {
 
   // ─── Dynamic Lighting Update ────────────────────────────────
   useEffect(() => {
-    if (!sceneRef.current || !sunLightRef.current || !ambientLightRef.current) return;
+    if (!sceneRef.current || !sunLightRef.current || !ambientLightRef.current || !currentTime) return;
     
     const lat = location?.lat ?? 40.7128; // Default NYC if no location
     const lng = location?.lng ?? -74.006;
@@ -321,7 +501,22 @@ export default function SimulationPage() {
   }, [currentTime, location, calculateSunPosition]);
 
   // ─── UI Theme Based on Time of Day ──────────────────────────
+  // Default dark theme for SSR, then computed based on time after hydration
   const uiTheme = useMemo(() => {
+    // Use stable dark theme for SSR (currentTime is null on server)
+    if (!currentTime) {
+      return {
+        panelBg: 'rgba(10, 10, 26, 0.95)',
+        borderColor: 'rgba(74, 158, 255, 0.15)',
+        textPrimary: '#f0f0ff',
+        textSecondary: '#b0b0dd',
+        textMuted: '#9999bb',
+        cardBg: 'rgba(255,255,255,0.05)',
+        cardBgHover: 'rgba(74,158,255,0.12)',
+        dayFactor: 0,
+      };
+    }
+    
     const lat = location?.lat ?? 40.7128;
     const lng = location?.lng ?? -74.006;
     const { altitude } = calculateSunPosition(currentTime, lat, lng);
@@ -684,6 +879,65 @@ export default function SimulationPage() {
     pointLight2.position.set(10, 5, 10);
     scene.add(pointLight2);
 
+    // ─── Weather Particle Systems ──────────────────────
+    // Rain particles
+    const rainCount = 3000;
+    const rainGeometry = new THREE.BufferGeometry();
+    const rainPositions = new Float32Array(rainCount * 3);
+    const rainVelocities = new Float32Array(rainCount); // Store Y velocity
+    
+    for (let i = 0; i < rainCount; i++) {
+      rainPositions[i * 3] = (Math.random() - 0.5) * 60;     // X
+      rainPositions[i * 3 + 1] = Math.random() * 30;          // Y
+      rainPositions[i * 3 + 2] = (Math.random() - 0.5) * 60;  // Z
+      rainVelocities[i] = 0.3 + Math.random() * 0.4;          // Fall speed
+    }
+    
+    rainGeometry.setAttribute('position', new THREE.BufferAttribute(rainPositions, 3));
+    rainGeometry.setAttribute('velocity', new THREE.BufferAttribute(rainVelocities, 1));
+    
+    const rainMaterial = new THREE.PointsMaterial({
+      color: 0x6699cc,
+      size: 0.1,
+      transparent: true,
+      opacity: 0.6,
+      blending: THREE.AdditiveBlending,
+    });
+    
+    const rainParticles = new THREE.Points(rainGeometry, rainMaterial);
+    rainParticles.visible = false; // Hidden by default
+    scene.add(rainParticles);
+    rainParticlesRef.current = rainParticles;
+
+    // Snow particles (reuse for snow effect)
+    const snowCount = 2000;
+    const snowGeometry = new THREE.BufferGeometry();
+    const snowPositions = new Float32Array(snowCount * 3);
+    const snowDrifts = new Float32Array(snowCount); // Horizontal drift
+    
+    for (let i = 0; i < snowCount; i++) {
+      snowPositions[i * 3] = (Math.random() - 0.5) * 60;
+      snowPositions[i * 3 + 1] = Math.random() * 25;
+      snowPositions[i * 3 + 2] = (Math.random() - 0.5) * 60;
+      snowDrifts[i] = (Math.random() - 0.5) * 0.02;
+    }
+    
+    snowGeometry.setAttribute('position', new THREE.BufferAttribute(snowPositions, 3));
+    snowGeometry.setAttribute('drift', new THREE.BufferAttribute(snowDrifts, 1));
+    
+    const snowMaterial = new THREE.PointsMaterial({
+      color: 0xffffff,
+      size: 0.15,
+      transparent: true,
+      opacity: 0.8,
+      blending: THREE.AdditiveBlending,
+    });
+    
+    const snowParticles = new THREE.Points(snowGeometry, snowMaterial);
+    snowParticles.visible = false;
+    scene.add(snowParticles);
+    cloudParticlesRef.current = snowParticles; // Reuse cloudParticlesRef for snow
+
     // ─── Animation Loop ────────────────────────────────
     const clock = new THREE.Clock();
     let rafId: number;
@@ -734,6 +988,44 @@ export default function SimulationPage() {
             ring.material.opacity = 0.15;
           }
         }
+      }
+
+      // ─── Animate Rain Particles ────────────────────
+      if (rainParticles.visible) {
+        const positions = rainGeometry.attributes.position.array as Float32Array;
+        const velocities = rainGeometry.attributes.velocity.array as Float32Array;
+        
+        for (let i = 0; i < rainCount; i++) {
+          positions[i * 3 + 1] -= velocities[i]; // Fall down
+          
+          // Reset to top when below ground
+          if (positions[i * 3 + 1] < 0) {
+            positions[i * 3 + 1] = 25 + Math.random() * 5;
+            positions[i * 3] = (Math.random() - 0.5) * 60;
+            positions[i * 3 + 2] = (Math.random() - 0.5) * 60;
+          }
+        }
+        rainGeometry.attributes.position.needsUpdate = true;
+      }
+
+      // ─── Animate Snow Particles ────────────────────
+      if (snowParticles.visible) {
+        const positions = snowGeometry.attributes.position.array as Float32Array;
+        const drifts = snowGeometry.attributes.drift.array as Float32Array;
+        
+        for (let i = 0; i < snowCount; i++) {
+          positions[i * 3 + 1] -= 0.03; // Slow fall
+          positions[i * 3] += drifts[i] + Math.sin(elapsed + i) * 0.005; // Drift
+          positions[i * 3 + 2] += Math.cos(elapsed * 0.7 + i) * 0.003;
+          
+          // Reset to top when below ground
+          if (positions[i * 3 + 1] < 0) {
+            positions[i * 3 + 1] = 20 + Math.random() * 5;
+            positions[i * 3] = (Math.random() - 0.5) * 60;
+            positions[i * 3 + 2] = (Math.random() - 0.5) * 60;
+          }
+        }
+        snowGeometry.attributes.position.needsUpdate = true;
       }
 
       renderer.render(scene, camera);
@@ -1010,13 +1302,63 @@ export default function SimulationPage() {
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
           <div style={{ fontSize: '12px', color: '#a0a0c0', fontFamily: 'monospace', textAlign: 'right' }}>
-            <div>{currentTime.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}</div>
-            <div>{currentTime.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</div>
+            <div>{currentTime?.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' }) ?? '—'}</div>
+            <div>{currentTime?.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) ?? '—'}</div>
           </div>
           {location && (
             <div style={{ fontSize: '11px', color: '#7a7a9a', fontFamily: 'monospace' }}>
               📍 {location.lat.toFixed(3)}, {location.lng.toFixed(3)}
             </div>
+          )}
+          {weather && (
+            <div style={{ 
+              fontSize: '12px', 
+              color: '#e0e0ff', 
+              fontFamily: 'system-ui',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              background: 'rgba(74, 158, 255, 0.1)',
+              padding: '4px 10px',
+              borderRadius: '6px',
+              border: '1px solid rgba(74, 158, 255, 0.2)',
+            }}>
+              <span style={{ fontSize: '18px' }}>{getWeatherEmoji(weather)}</span>
+              <div style={{ textAlign: 'left' }}>
+                <div style={{ fontWeight: 600 }}>{weather.temperature}°F</div>
+                <div style={{ fontSize: '10px', color: '#a0a0c0' }}>{weather.condition}</div>
+              </div>
+            </div>
+          )}
+          {weather?.airQuality && (
+            <button
+              onClick={() => setShowAirQuality(!showAirQuality)}
+              style={{
+                fontSize: '12px',
+                color: '#e0e0ff',
+                fontFamily: 'system-ui',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                background: showAirQuality ? 'rgba(74, 158, 255, 0.2)' : 'rgba(74, 158, 255, 0.1)',
+                padding: '4px 10px',
+                borderRadius: '6px',
+                border: `1px solid ${showAirQuality ? 'rgba(74, 158, 255, 0.4)' : 'rgba(74, 158, 255, 0.2)'}`,
+                cursor: 'pointer',
+                transition: 'all 0.2s',
+              }}
+            >
+              <span style={{ fontSize: '16px' }}>🫁</span>
+              <div style={{ textAlign: 'left' }}>
+                <div style={{ 
+                  fontWeight: 600,
+                  color: getAQIColor(weather.airQuality.us_aqi)
+                }}>
+                  AQI {weather.airQuality.us_aqi}
+                </div>
+                <div style={{ fontSize: '10px', color: '#a0a0c0' }}>{weather.airQuality.quality_label}</div>
+              </div>
+            </button>
           )}
           <div
             ref={statusRef}
@@ -1197,21 +1539,29 @@ export default function SimulationPage() {
         <div
           style={{
             position: 'absolute',
-            top: '100px',
+            top: '115px',
             left: showFeed ? '288px' : '8px',
-            width: '215px',
+            width: '240px',
             background: uiTheme.panelBg,
             border: `1px solid ${uiTheme.borderColor}`,
-            borderRadius: '10px',
+            borderRadius: '12px',
             zIndex: 15,
             fontFamily: "'Inter', system-ui, sans-serif",
             backdropFilter: 'blur(10px)',
-            padding: '12px',
+            padding: '14px 16px',
             boxShadow: '0 4px 20px rgba(0,0,0,0.3)',
             transition: 'left 0.3s, background 0.5s, border-color 0.5s',
           }}
         >
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+          {/* Header */}
+          <div style={{ 
+            display: 'flex', 
+            justifyContent: 'space-between', 
+            alignItems: 'center', 
+            marginBottom: '14px',
+            paddingBottom: '10px',
+            borderBottom: `1px solid ${uiTheme.borderColor}`,
+          }}>
             <span style={{ color: uiTheme.textSecondary, fontSize: '10px', letterSpacing: '1px', textTransform: 'uppercase' as const }}>
               📊 Bot Metrics
             </span>
@@ -1224,104 +1574,333 @@ export default function SimulationPage() {
                 cursor: 'pointer',
                 fontSize: '14px',
                 padding: '0',
+                lineHeight: 1,
               }}
             >
               ✕
             </button>
           </div>
           
+          {/* Bot Identity */}
           <div style={{ 
             display: 'flex', 
             alignItems: 'center', 
-            gap: '8px', 
-            marginBottom: '12px',
-            padding: '8px',
+            gap: '12px', 
+            marginBottom: '16px',
+            padding: '10px 12px',
             background: 'rgba(255,255,255,0.05)',
-            borderRadius: '8px',
-            borderLeft: `3px solid ${selectedBotInfo.color}`,
+            borderRadius: '10px',
+            borderLeft: `4px solid ${selectedBotInfo.color}`,
           }}>
-            <span style={{ fontSize: '24px' }}>
+            <span style={{ fontSize: '28px', lineHeight: 1 }}>
               {BOT_VISUALS[selectedBotInfo.personality]?.emoji || '🤖'}
             </span>
             <div>
-              <div style={{ color: selectedBotInfo.color, fontWeight: 600, fontSize: '14px' }}>
+              <div style={{ color: selectedBotInfo.color, fontWeight: 600, fontSize: '15px', marginBottom: '2px' }}>
                 {selectedBotInfo.botName}
               </div>
-              <div style={{ color: uiTheme.textMuted, fontSize: '10px', textTransform: 'capitalize' as const }}>
+              <div style={{ color: uiTheme.textMuted, fontSize: '11px', textTransform: 'capitalize' as const }}>
                 {selectedBotInfo.personality}
               </div>
             </div>
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px' }}>
+          {/* Stats Grid */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '10px', marginBottom: '14px' }}>
             <div style={{ 
               background: 'rgba(74, 158, 255, 0.1)', 
-              padding: '8px', 
-              borderRadius: '6px',
+              padding: '10px 8px', 
+              borderRadius: '8px',
               textAlign: 'center' as const,
             }}>
-              <div style={{ color: '#4a9eff', fontSize: '18px', fontWeight: 700 }}>
+              <div style={{ color: '#4a9eff', fontSize: '20px', fontWeight: 700, marginBottom: '4px' }}>
                 {selectedBotInfo.postCount}
               </div>
-              <div style={{ color: uiTheme.textMuted, fontSize: '9px', textTransform: 'uppercase' as const }}>
+              <div style={{ color: uiTheme.textMuted, fontSize: '9px', textTransform: 'uppercase' as const, letterSpacing: '0.5px' }}>
                 Posts
               </div>
             </div>
             <div style={{ 
               background: 'rgba(255, 152, 0, 0.1)', 
-              padding: '8px', 
-              borderRadius: '6px',
+              padding: '10px 8px', 
+              borderRadius: '8px',
               textAlign: 'center' as const,
             }}>
-              <div style={{ color: '#ff9800', fontSize: '14px', fontWeight: 700 }}>
+              <div style={{ color: '#ff9800', fontSize: '15px', fontWeight: 700, marginBottom: '4px' }}>
                 {selectedBotInfo.height ? `${selectedBotInfo.height.toFixed(2)}m` : '—'}
               </div>
-              <div style={{ color: uiTheme.textMuted, fontSize: '9px', textTransform: 'uppercase' as const }}>
+              <div style={{ color: uiTheme.textMuted, fontSize: '9px', textTransform: 'uppercase' as const, letterSpacing: '0.5px' }}>
                 Height
               </div>
             </div>
             <div style={{ 
               background: 'rgba(76, 175, 80, 0.1)', 
-              padding: '8px', 
-              borderRadius: '6px',
+              padding: '10px 8px', 
+              borderRadius: '8px',
               textAlign: 'center' as const,
             }}>
               <div style={{ 
                 color: selectedBotInfo.state === 'posting' ? '#fbbf24' : '#4caf50', 
-                fontSize: '11px', 
+                fontSize: '12px', 
                 fontWeight: 600,
                 textTransform: 'capitalize' as const,
+                marginBottom: '4px',
               }}>
                 {selectedBotInfo.state || 'idle'}
               </div>
-              <div style={{ color: uiTheme.textMuted, fontSize: '9px', textTransform: 'uppercase' as const }}>
+              <div style={{ color: uiTheme.textMuted, fontSize: '9px', textTransform: 'uppercase' as const, letterSpacing: '0.5px' }}>
                 Status
               </div>
             </div>
           </div>
 
+          {/* Last Active */}
           {selectedBotInfo.lastPostTime && (
             <div style={{ 
-              marginTop: '10px', 
-              padding: '6px 8px',
+              padding: '8px 10px',
               background: 'rgba(255,255,255,0.03)',
-              borderRadius: '6px',
-              fontSize: '10px',
+              borderRadius: '8px',
+              fontSize: '11px',
               color: uiTheme.textMuted,
+              marginBottom: '10px',
             }}>
               <span style={{ opacity: 0.7 }}>Last active:</span>{' '}
-              <span style={{ color: uiTheme.textSecondary }}>{selectedBotInfo.lastPostTime}</span>
+              <span style={{ color: uiTheme.textSecondary, fontWeight: 500 }}>{selectedBotInfo.lastPostTime}</span>
             </div>
           )}
 
+          {/* Bot ID */}
           <div style={{ 
-            marginTop: '10px', 
-            fontSize: '9px', 
+            fontSize: '10px', 
             color: uiTheme.textMuted,
             fontFamily: 'monospace',
-            opacity: 0.6,
+            opacity: 0.5,
+            paddingTop: '6px',
+            borderTop: `1px solid ${uiTheme.borderColor}`,
           }}>
-            ID: {selectedBotInfo.botId.substring(0, 8)}...
+            ID: {selectedBotInfo.botId.substring(0, 12)}...
+          </div>
+        </div>
+      )}
+
+      {/* Air Quality Panel (upper right corner) */}
+      {showAirQuality && weather?.airQuality && (
+        <div
+          style={{
+            position: 'absolute',
+            top: '115px',
+            right: '8px',
+            width: '320px',
+            background: uiTheme.panelBg,
+            border: `1px solid ${uiTheme.borderColor}`,
+            borderRadius: '12px',
+            zIndex: 15,
+            fontFamily: "'Inter', system-ui, sans-serif",
+            backdropFilter: 'blur(10px)',
+            padding: '16px 18px',
+            boxShadow: '0 4px 20px rgba(0,0,0,0.3)',
+            transition: 'background 0.5s, border-color 0.5s',
+          }}
+        >
+          {/* Header */}
+          <div style={{ 
+            display: 'flex', 
+            justifyContent: 'space-between', 
+            alignItems: 'center', 
+            marginBottom: '16px',
+            paddingBottom: '12px',
+            borderBottom: `1px solid ${uiTheme.borderColor}`,
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span style={{ fontSize: '22px' }}>🫁</span>
+              <span style={{ color: uiTheme.textSecondary, fontSize: '10px', letterSpacing: '1px', textTransform: 'uppercase' as const }}>
+                Air Quality Index
+              </span>
+            </div>
+            <button
+              onClick={() => setShowAirQuality(false)}
+              style={{
+                color: uiTheme.textMuted,
+                background: 'none',
+                border: 'none',
+                cursor: 'pointer',
+                fontSize: '14px',
+                padding: '0',
+                lineHeight: 1,
+              }}
+            >
+              ✕
+            </button>
+          </div>
+          
+          {/* AQI Summary Cards */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '18px' }}>
+            <div style={{ 
+              background: `${getAQIColor(weather.airQuality.us_aqi)}15`,
+              padding: '14px',
+              borderRadius: '10px',
+              border: `2px solid ${getAQIColor(weather.airQuality.us_aqi)}40`,
+              textAlign: 'center' as const,
+            }}>
+              <div style={{ 
+                color: getAQIColor(weather.airQuality.us_aqi), 
+                fontSize: '28px', 
+                fontWeight: 700, 
+                marginBottom: '4px',
+                textShadow: `0 0 10px ${getAQIColor(weather.airQuality.us_aqi)}40`
+              }}>
+                {weather.airQuality.us_aqi}
+              </div>
+              <div style={{ color: uiTheme.textMuted, fontSize: '10px', textTransform: 'uppercase' as const, letterSpacing: '0.5px' }}>
+                US AQI
+              </div>
+              <div style={{ 
+                color: getAQIColor(weather.airQuality.us_aqi), 
+                fontSize: '9px', 
+                fontWeight: 600,
+                marginTop: '6px',
+                textTransform: 'uppercase' as const
+              }}>
+                {weather.airQuality.quality_label}
+              </div>
+            </div>
+            <div style={{ 
+              background: 'rgba(74, 158, 255, 0.1)', 
+              padding: '14px',
+              borderRadius: '10px',
+              border: '2px solid rgba(74, 158, 255, 0.3)',
+              textAlign: 'center' as const,
+            }}>
+              <div style={{ 
+                color: '#4a9eff', 
+                fontSize: '28px', 
+                fontWeight: 700, 
+                marginBottom: '4px',
+                textShadow: '0 0 10px rgba(74, 158, 255, 0.4)'
+              }}>
+                {weather.airQuality.european_aqi}
+              </div>
+              <div style={{ color: uiTheme.textMuted, fontSize: '10px', textTransform: 'uppercase' as const, letterSpacing: '0.5px' }}>
+                European AQI
+              </div>
+              <div style={{ 
+                color: uiTheme.textSecondary, 
+                fontSize: '9px', 
+                marginTop: '6px'
+              }}>
+                (0-100 scale)
+              </div>
+            </div>
+          </div>
+
+          {/* Particulate Matter */}
+          <div style={{ marginBottom: '14px' }}>
+            <div style={{ 
+              color: uiTheme.textMuted, 
+              fontSize: '9px', 
+              textTransform: 'uppercase' as const, 
+              letterSpacing: '1px',
+              marginBottom: '10px',
+              fontWeight: 600
+            }}>
+              🪨 Particulate Matter
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+              <div style={{ 
+                background: 'rgba(255,255,255,0.05)', 
+                padding: '10px 12px', 
+                borderRadius: '8px',
+                border: `1px solid ${uiTheme.borderColor}`,
+              }}>
+                <div style={{ fontSize: '9px', color: uiTheme.textMuted, marginBottom: '4px' }}>PM2.5</div>
+                <div style={{ fontSize: '16px', color: uiTheme.textPrimary, fontWeight: 600 }}>
+                  {weather.airQuality.pm2_5} <span style={{ fontSize: '10px', color: uiTheme.textMuted }}>µg/m³</span>
+                </div>
+              </div>
+              <div style={{ 
+                background: 'rgba(255,255,255,0.05)', 
+                padding: '10px 12px', 
+                borderRadius: '8px',
+                border: `1px solid ${uiTheme.borderColor}`,
+              }}>
+                <div style={{ fontSize: '9px', color: uiTheme.textMuted, marginBottom: '4px' }}>PM10</div>
+                <div style={{ fontSize: '16px', color: uiTheme.textPrimary, fontWeight: 600 }}>
+                  {weather.airQuality.pm10} <span style={{ fontSize: '10px', color: uiTheme.textMuted }}>µg/m³</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Gases */}
+          <div>
+            <div style={{ 
+              color: uiTheme.textMuted, 
+              fontSize: '9px', 
+              textTransform: 'uppercase' as const, 
+              letterSpacing: '1px',
+              marginBottom: '10px',
+              fontWeight: 600
+            }}>
+              💨 Atmospheric Gases
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+              <div style={{ 
+                background: 'rgba(255,255,255,0.05)', 
+                padding: '8px 10px', 
+                borderRadius: '8px',
+                border: `1px solid ${uiTheme.borderColor}`,
+              }}>
+                <div style={{ fontSize: '8px', color: uiTheme.textMuted, marginBottom: '2px' }}>Ozone (O₃)</div>
+                <div style={{ fontSize: '14px', color: uiTheme.textPrimary, fontWeight: 600 }}>
+                  {weather.airQuality.ozone} <span style={{ fontSize: '9px', color: uiTheme.textMuted }}>µg/m³</span>
+                </div>
+              </div>
+              <div style={{ 
+                background: 'rgba(255,255,255,0.05)', 
+                padding: '8px 10px', 
+                borderRadius: '8px',
+                border: `1px solid ${uiTheme.borderColor}`,
+              }}>
+                <div style={{ fontSize: '8px', color: uiTheme.textMuted, marginBottom: '2px' }}>NO₂</div>
+                <div style={{ fontSize: '14px', color: uiTheme.textPrimary, fontWeight: 600 }}>
+                  {weather.airQuality.nitrogen_dioxide} <span style={{ fontSize: '9px', color: uiTheme.textMuted }}>µg/m³</span>
+                </div>
+              </div>
+              <div style={{ 
+                background: 'rgba(255,255,255,0.05)', 
+                padding: '8px 10px', 
+                borderRadius: '8px',
+                border: `1px solid ${uiTheme.borderColor}`,
+              }}>
+                <div style={{ fontSize: '8px', color: uiTheme.textMuted, marginBottom: '2px' }}>SO₂</div>
+                <div style={{ fontSize: '14px', color: uiTheme.textPrimary, fontWeight: 600 }}>
+                  {weather.airQuality.sulphur_dioxide} <span style={{ fontSize: '9px', color: uiTheme.textMuted }}>µg/m³</span>
+                </div>
+              </div>
+              <div style={{ 
+                background: 'rgba(255,255,255,0.05)', 
+                padding: '8px 10px', 
+                borderRadius: '8px',
+                border: `1px solid ${uiTheme.borderColor}`,
+              }}>
+                <div style={{ fontSize: '8px', color: uiTheme.textMuted, marginBottom: '2px' }}>CO</div>
+                <div style={{ fontSize: '14px', color: uiTheme.textPrimary, fontWeight: 600 }}>
+                  {weather.airQuality.carbon_monoxide} <span style={{ fontSize: '9px', color: uiTheme.textMuted }}>µg/m³</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Info Footer */}
+          <div style={{ 
+            fontSize: '9px', 
+            color: uiTheme.textMuted,
+            marginTop: '14px',
+            paddingTop: '12px',
+            borderTop: `1px solid ${uiTheme.borderColor}`,
+            textAlign: 'center' as const,
+          }}>
+            Data from Open-Meteo Air Quality API • Updated every 10 min
           </div>
         </div>
       )}

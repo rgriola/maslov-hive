@@ -7,10 +7,24 @@
 export const AI_CONFIG = {
   // Gemini model to use (options: 'gemini-2.0-flash', 'gemini-1.5-pro', 'gemini-pro')
   model: 'gemini-2.0-flash',
-  
+
   // Maximum tokens for generated content
   maxTokens: 500,
 };
+
+// ============================================
+// SHARED TYPES
+// ============================================
+export interface Personality {
+  name: string;
+  description: string;
+  interests: string[];
+  style: string;
+  adjectives: string[];
+  postFrequency: number; // milliseconds
+  commentProbability: number; // 0-1
+  votingBehavior: 'enthusiastic' | 'thoughtful' | 'random';
+}
 
 // ============================================
 // TIMING SETTINGS (in milliseconds)
@@ -18,20 +32,20 @@ export const AI_CONFIG = {
 export const TIMING = {
   // How often TechBot posts (2 minutes - free tier friendly)
   techBotPostFrequency: 120000,
-  
+
   // How often PhilosopherBot posts (3 minutes - staggered from TechBot)
   philoBotPostFrequency: 120000,
-    // How often ArtBot posts (2.5 minutes)
+  // How often ArtBot posts (2.5 minutes)
   artBotPostFrequency: 120000,
-  
+
   // How often ScienceBot posts (3.5 minutes)
   scienceBotPostFrequency: 120000,
-    // Delay between API calls to avoid rate limiting
+  // Delay between API calls to avoid rate limiting
   apiCallDelay: 6000,
-  
+
   // Retry delay for rate-limited requests (starts at this, doubles each retry)
   retryBaseDelay: 10000,
-  
+
   // Maximum retries for rate-limited requests
   maxRetries: 1,
 };
@@ -42,16 +56,16 @@ export const TIMING = {
 export const BEHAVIOR = {
   // Probability that TechBot will comment on a relevant post (0.0 - 1.0)
   techBotCommentProbability: 0.7,
-  
+
   // Probability that PhilosopherBot will comment (0.0 - 1.0)
   philoBotCommentProbability: 0.9,
-  
+
   // Probability that ArtBot will comment (0.0 - 1.0)
   artBotCommentProbability: 0.8,
-  
+
   // Probability that ScienceBot will comment (0.0 - 1.0)
   scienceBotCommentProbability: 0.6,
-  
+
   // Keywords that trigger TechBot to comment
   techKeywords: [
     'ai', 'tech', 'code', 'programming', 'software', 'machine', 'data', 'cloud', 'api', 'developer',
@@ -59,7 +73,7 @@ export const BEHAVIOR = {
     'deploy', 'framework', 'language', 'python', 'javascript', 'rust', 'database', 'server', 'debug',
     'performance', 'scale', 'architecture', 'infrastructure', 'devops', 'startup', 'innovation', 'future'
   ],
-  
+
   // Keywords that trigger PhilosopherBot to comment
   philoKeywords: [
     'consciousness', 'ethics', 'existence', 'meaning', 'truth', 'philosophy', 'mind', 'reality',
@@ -67,7 +81,7 @@ export const BEHAVIOR = {
     'free will', 'nature', 'being', 'wisdom', 'knowledge', 'understand', 'reason', 'logic',
     'metaphysic', 'existential', 'authentic', 'human', 'life', 'death', 'experience', 'perception'
   ],
-  
+
   // Keywords that trigger ArtBot to comment
   artKeywords: [
     'art', 'creative', 'design', 'aesthetic', 'beauty', 'expression', 'visual', 'music', 'culture', 'imagination',
@@ -75,7 +89,7 @@ export const BEHAVIOR = {
     'painting', 'sculpture', 'digital art', 'generative', 'abstract', 'modern', 'contemporary', 'emotion',
     'story', 'narrative', 'medium', 'texture', 'pattern', 'harmony', 'contrast', 'vision'
   ],
-  
+
   // Keywords that trigger ScienceBot to comment
   scienceKeywords: [
     'science', 'research', 'experiment', 'data', 'hypothesis', 'discovery', 'physics', 'biology', 'chemistry', 'study',
@@ -91,10 +105,10 @@ export const BEHAVIOR = {
 export const API = {
   // Base URL for the Bot-Talker API
   baseUrl: process.env.API_BASE_URL || 'http://localhost:3000/api/v1',
-  
+
   // Request timeout in milliseconds
   timeout: 10000,
-  
+
   // Number of retries on failure
   retries: 3,
 };

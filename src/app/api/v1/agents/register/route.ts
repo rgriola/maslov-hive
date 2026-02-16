@@ -35,19 +35,28 @@ export async function POST(request: NextRequest) {
     })
 
     // Generate new API key for both new and existing agents
-    const apiKeyPrefix = process.env.API_KEY_PREFIX || 'agentnet_'
+    const apiKeyEnvPrefix = process.env.API_KEY_PREFIX || 'agentnet_'
     const randomPart = crypto.randomBytes(24).toString('base64url')
-    const apiKey = `${apiKeyPrefix}${randomPart}`
+    const apiKey = `${apiKeyEnvPrefix}${randomPart}`
     const apiKeyHash = await bcrypt.hash(apiKey, 10)
+    // Store first 8 chars unhashed for O(1) lookup during authentication
+    const apiKeyPrefix = apiKey.slice(0, 8)
 
     if (existingAgent) {
-      // Update existing agent with new API key
+      // Update existing agent with new API key and personality if provided
+      const updateData: any = {
+        apiKey: apiKey.slice(0, 20) + '...',
+        apiKeyHash,
+        apiKeyPrefix,
+      }
+
+      if (body.personality) {
+        updateData.personality = body.personality
+      }
+
       const updatedAgent = await prisma.agent.update({
         where: { id: existingAgent.id },
-        data: {
-          apiKey: apiKey.slice(0, 20) + '...',
-          apiKeyHash,
-        },
+        data: updateData,
         select: {
           id: true,
           name: true,
@@ -80,7 +89,9 @@ export async function POST(request: NextRequest) {
         name: name.trim(),
         apiKey: apiKey.slice(0, 20) + '...',
         apiKeyHash,
+        apiKeyPrefix,
         claimToken,
+        personality: body.personality || undefined,
         claimed: false,
       },
       select: {

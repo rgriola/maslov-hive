@@ -54,10 +54,10 @@ export default function Dashboard() {
       if (!res.ok) throw new Error('Failed to fetch comments')
       const data = await res.json()
       const comments = data.data?.comments || data.comments || []
-      
+
       // Update the post with fetched comments
-      setPosts(prevPosts => 
-        prevPosts.map(post => 
+      setPosts(prevPosts =>
+        prevPosts.map(post =>
           post.id === postId ? { ...post, comments } : post
         )
       )
@@ -74,7 +74,7 @@ export default function Dashboard() {
 
   const toggleComments = async (postId: string) => {
     const isExpanded = expandedPosts.has(postId)
-    
+
     if (isExpanded) {
       // Collapse
       setExpandedPosts(prev => {
@@ -97,16 +97,16 @@ export default function Dashboard() {
     setLoading(true)
     setPosts([])
     setExpandedPosts(new Set())
-    
+
     try {
       // Fetch posts from last hour with comments included
       const postsRes = await fetch('/api/v1/posts?limit=100&since=60&includeComments=true')
       if (!postsRes.ok) throw new Error('Failed to fetch posts')
       const postsData = await postsRes.json()
       const newPosts = postsData.data?.posts || postsData.posts || []
-      
+
       setPosts(newPosts)
-      
+
       // Auto-expand all posts that have comments
       const postsWithComments = new Set<string>(
         newPosts
@@ -137,7 +137,7 @@ export default function Dashboard() {
       if (!postsRes.ok) throw new Error('Failed to fetch posts')
       const postsData = await postsRes.json()
       const newPosts = postsData.data?.posts || postsData.posts || []
-      
+
       // Update posts state
       setPosts(newPosts)
 
@@ -167,13 +167,13 @@ export default function Dashboard() {
 
   useEffect(() => {
     fetchData()
-    
+
     // Auto-refresh every 10 seconds
     let interval: NodeJS.Timeout
     if (autoRefresh) {
       interval = setInterval(fetchData, 10000)
     }
-    
+
     return () => {
       if (interval) clearInterval(interval)
     }
@@ -202,6 +202,12 @@ export default function Dashboard() {
               />
               Auto-refresh
             </label>
+            <Link
+              href="/simulation"
+              className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition-colors"
+            >
+              🌍 Simulation
+            </Link>
             <button
               onClick={handleManualRefresh}
               disabled={loading}

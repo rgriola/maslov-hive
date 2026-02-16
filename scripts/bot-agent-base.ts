@@ -1,37 +1,32 @@
+
 // Bot Agent Base Class
 // Provides core functionality for AI agents to interact with the platform
 
 import * as fs from 'fs';
 import * as path from 'path';
 
+import { Personality } from './config';
+import { WorldConnector } from './connectors/interface';
+import { Post } from '@prisma/client';
+
 interface AgentConfig {
   name: string;
   apiKey?: string;
   blueskyHandle?: string;
   blueskyPassword?: string;
-  persona: {
-    interests: string[];
-    postFrequency: number; // milliseconds
-    commentProbability: number; // 0-1
-    votingBehavior: 'enthusiastic' | 'thoughtful' | 'random';
-  };
-  behaviors: {
+
+  // Optional: override default persona behavior
+  personality?: Personality;
+
+  // Optional: override behavior functions (for legacy scripts)
+  behaviors?: {
     generatePost: () => Promise<{ title: string; content: string }>;
     shouldComment: (post: Post) => Promise<boolean>;
     generateComment: (post: Post) => Promise<string>;
   };
 }
 
-interface Post {
-  id: string;
-  title: string;
-  content: string;
-  agentId: string;
-  agent?: { name: string; blueskyHandle?: string };
-  createdAt: string;
-  _count?: { comments: number; votes: number };
-}
-
+// Local interfaces that don't conflict with Prisma types
 interface Pagination {
   page: number;
   limit: number;
@@ -45,26 +40,28 @@ interface ApiResponse<T> {
   error?: string;
 }
 
+import { generatePostWithGemini, generateCommentWithGemini, shouldCommentWithGemini } from './gemini';
+
 export class BotAgent {
   private config: AgentConfig;
-  private baseUrl: string;
-  private apiKey: string | null = null;
+  private connector: WorldConnector;
   private isRunning = false;
   private heartbeatInterval: NodeJS.Timeout | null = null;
   private keyFilePath: string;
+  private apiKey: string | null = null;
 
-  constructor(config: AgentConfig) {
+  constructor(config: AgentConfig, connector: WorldConnector) {
     this.config = config;
-    this.baseUrl = process.env.API_BASE_URL || 'http://localhost:3000/api/v1';
-    
-    // Set up API key file path
+    this.connector = connector;
+
+    // Set up API key file path (still useful for local persistence of identity)
     const keysDir = path.join(process.cwd(), '.agent-keys');
     if (!fs.existsSync(keysDir)) {
       fs.mkdirSync(keysDir, { recursive: true });
     }
     this.keyFilePath = path.join(keysDir, `${config.name.toLowerCase().replace(/\s+/g, '-')}.key`);
-    
-    // Load API key: from config, from file, or null
+
+    // Load API key mechanism (legacy/hybrid support)
     this.apiKey = config.apiKey || this.loadApiKey() || null;
   }
 
@@ -97,173 +94,85 @@ export class BotAgent {
     console.log(`${timestamp} ${emoji} [${this.config.name}] ${message}`);
   }
 
-  private async request<T>(
-    endpoint: string,
-    options: RequestInit = {},
-    retries = 3
-  ): Promise<ApiResponse<T>> {
-    const url = `${this.baseUrl}${endpoint}`;
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-      ...(options.headers as Record<string, string>),
-    };
-
-    if (this.apiKey) {
-      headers['Authorization'] = `Bearer ${this.apiKey}`;
-    }
-
-    for (let attempt = 1; attempt <= retries; attempt++) {
-      try {
-        const response = await fetch(url, { ...options, headers });
-        const data = await response.json();
-
-        if (!response.ok) {
-          throw new Error(data.error || `HTTP ${response.status}`);
-        }
-
-        return data;
-      } catch (error) {
-        this.log('⚠️', `Request failed (attempt ${attempt}/${retries}): ${error}`);
-        if (attempt === retries) {
-          return { success: false, error: String(error) };
-        }
-        await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
-      }
-    }
-
-    return { success: false, error: 'Max retries exceeded' };
-  }
-
+  // NOTE: register() keep simple for now
   async register(): Promise<boolean> {
-    this.log('📝', 'Registering agent...');
-    const response = await this.request<{ apiKey: string; claimToken: string; isExisting?: boolean }>(
-      '/agents/register',
-      {
-        method: 'POST',
-        body: JSON.stringify({ name: this.config.name }),
-      }
-    );
-
-    if (response.success && response.data) {
-      this.apiKey = response.data.apiKey;
-      this.saveApiKey(this.apiKey); // Save the key to file for persistence
-      const status = response.data.isExisting ? 'reconnected to existing agent' : 'registered new agent';
-      this.log('✅', `Success (${status})! API Key: ${this.apiKey.substring(0, 20)}...`);
-      return true;
-    }
-
-    this.log('❌', `Registration failed: ${response.error}`);
-    return false;
+    // For hybrid model, registration might be an API call via a separate connector method
+    // or just handled by metadata. 
+    // We will assume identity is handled externally or by the connector.
+    this.log('ℹ️', 'Register/Connect handled by connector (conceptually)');
+    return true;
   }
 
   async verifyBluesky(): Promise<boolean> {
-    if (!this.config.blueskyHandle || !this.config.blueskyPassword) {
-      this.log('⏭️', 'Skipping Bluesky verification (no credentials)');
-      return false;
-    }
-
-    this.log('🔐', 'Verifying Bluesky account...');
-    const response = await this.request<{ handle: string; did: string }>(
-      '/agents/verify-bluesky',
-      {
-        method: 'POST',
-        body: JSON.stringify({
-          handle: this.config.blueskyHandle,
-          password: this.config.blueskyPassword,
-        }),
-      }
-    );
-
-    if (response.success) {
-      this.log('✅', `Bluesky verified: ${response.data?.handle}`);
-      return true;
-    }
-
-    this.log('❌', `Bluesky verification failed: ${response.error}`);
+    this.log('⚠️', 'Bluesky verification not yet implemented in Connector');
     return false;
   }
 
   async fetchFeed(): Promise<Post[]> {
     this.log('🔄', 'Fetching feed...');
-    const response = await this.request<{ posts: Post[]; pagination: Pagination }>('/posts');
-
-    if (response.success && response.data?.posts) {
-      this.log('📰', `Fetched ${response.data.posts.length} posts`);
-      return response.data.posts;
+    try {
+      const posts = await this.connector.getRecentPosts();
+      this.log('📰', `Fetched ${posts.length} posts`);
+      return posts;
+    } catch (error) {
+      this.log('❌', `Failed to fetch feed: ${error}`);
+      return [];
     }
-
-    return [];
   }
 
   async createPost(title: string, content: string): Promise<Post | null> {
     this.log('📝', `Creating post: "${title.substring(0, 50)}..."`);
-    const response = await this.request<{ message: string; post: Post }>('/posts', {
-      method: 'POST',
-      body: JSON.stringify({ title, content }),
-    });
-
-    if (response.success && response.data?.post) {
-      this.log('✅', `Post created: ${response.data.post.id}`);
-      return response.data.post;
+    try {
+      const post = await this.connector.createPost(this.config.name, title, content);
+      this.log('✅', `Post created: ${post.id}`);
+      return post;
+    } catch (error) {
+      this.log('❌', `Failed to create post: ${error}`);
+      return null;
     }
-
-    this.log('❌', `Failed to create post: ${response.error}`);
-    return null;
   }
 
   async createComment(postId: string, content: string): Promise<boolean> {
     this.log('💬', `Commenting on post ${postId.substring(0, 8)}...`);
-    const response = await this.request('/comments', {
-      method: 'POST',
-      body: JSON.stringify({ postId, content }),
-    });
-
-    if (response.success) {
+    try {
+      await this.connector.createComment(this.config.name, postId, content);
       this.log('✅', 'Comment created');
       return true;
+    } catch (error) {
+      this.log('❌', `Failed to comment: ${error}`);
+      return false;
     }
-
-    this.log('❌', `Failed to comment: ${response.error}`);
-    return false;
   }
 
-  async vote(postId: string | null, commentId: string | null, value: 1 | -1): Promise<boolean> {
+  async vote(postId: string, value: 1 | -1): Promise<boolean> {
     const emoji = value === 1 ? '👍' : '👎';
-    const target = postId ? `post ${postId.substring(0, 8)}` : `comment ${commentId?.substring(0, 8)}`;
-    this.log(emoji, `Voting on ${target}...`);
-
-    const response = await this.request('/votes', {
-      method: 'POST',
-      body: JSON.stringify({ postId, commentId, value }),
-    });
-
-    if (response.success) {
+    this.log(emoji, `Voting on post ${postId.substring(0, 8)}...`);
+    try {
+      await this.connector.votePost(this.config.name, postId, value);
       this.log('✅', 'Vote recorded');
       return true;
+    } catch (error) {
+      this.log('❌', `Failed to vote: ${error}`);
+      return false;
     }
-
-    this.log('❌', `Failed to vote: ${response.error}`);
-    return false;
   }
 
   private shouldVote(post: Post): { shouldVote: boolean; value: 1 | -1 } {
-    const { votingBehavior, interests } = this.config.persona;
+    const votingBehavior = this.config.personality?.votingBehavior || 'random';
+    const interests = this.config.personality?.interests || [];
+
     const contentLower = (post.title + ' ' + post.content).toLowerCase();
-    const isRelevant = interests.some(interest => contentLower.includes(interest.toLowerCase()));
+    const isRelevant = interests.length > 0
+      ? interests.some(interest => contentLower.includes(interest.toLowerCase()))
+      : false;
 
     switch (votingBehavior) {
       case 'enthusiastic':
-        // Upvote 80% of relevant posts, 30% of others
-        if (isRelevant) {
-          return { shouldVote: Math.random() < 0.8, value: 1 };
-        }
+        if (isRelevant) return { shouldVote: Math.random() < 0.8, value: 1 };
         return { shouldVote: Math.random() < 0.3, value: Math.random() < 0.7 ? 1 : -1 };
 
       case 'thoughtful':
-        // Only vote on relevant posts, 60% upvote
-        if (isRelevant) {
-          return { shouldVote: Math.random() < 0.6, value: Math.random() < 0.8 ? 1 : -1 };
-        }
+        if (isRelevant) return { shouldVote: Math.random() < 0.6, value: Math.random() < 0.8 ? 1 : -1 };
         return { shouldVote: false, value: 1 };
 
       case 'random':
@@ -272,49 +181,120 @@ export class BotAgent {
     }
   }
 
+  // --- Dynamic Behavior Methods ---
+
+  private async generatePostDynamic(): Promise<{ title: string; content: string }> {
+    if (this.config.behaviors?.generatePost) {
+      return this.config.behaviors.generatePost();
+    }
+    if (!this.config.personality) {
+      throw new Error('Cannot generate post: no personality or behavior defined');
+    }
+
+    const personaDesc = `${this.config.personality.description}. Style: ${this.config.personality.style}.`;
+
+    return generatePostWithGemini(
+      this.config.name,
+      personaDesc,
+      this.config.personality.interests
+    );
+  }
+
+  private async shouldCommentDynamic(post: Post): Promise<boolean> {
+    if (this.config.behaviors?.shouldComment) {
+      return this.config.behaviors.shouldComment(post);
+    }
+    if (!this.config.personality) {
+      return false;
+    }
+
+    const content = (post.title + ' ' + post.content).toLowerCase();
+    const hasInterest = this.config.personality.interests.some(i => content.includes(i.toLowerCase()));
+
+    if (hasInterest) return true;
+
+    if (Math.random() > (this.config.personality.commentProbability || 0.5)) {
+      return false;
+    }
+
+    const personaDesc = `${this.config.personality.description}`;
+    return shouldCommentWithGemini(
+      this.config.name,
+      personaDesc,
+      this.config.personality.interests,
+      post.title,
+      post.content
+    );
+  }
+
+  private async generateCommentDynamic(post: Post): Promise<string> {
+    if (this.config.behaviors?.generateComment) {
+      return this.config.behaviors.generateComment(post);
+    }
+    if (!this.config.personality) {
+      return "Interesting post!";
+    }
+
+    const personaDesc = `${this.config.personality.description}. Style: ${this.config.personality.style}.`;
+
+    // Access nested agent properties safely
+    const authorName = (post as any).agent?.name || 'someone';
+
+    return generateCommentWithGemini(
+      this.config.name,
+      personaDesc,
+      post.title,
+      post.content,
+      authorName
+    );
+  }
+
   async heartbeat(): Promise<void> {
     this.log('💓', 'Heartbeat starting...');
 
     try {
-      // Fetch feed
       const posts = await this.fetchFeed();
 
-      // Process each post
+      // Process a few posts
       for (const post of posts.slice(0, 5)) {
         // Skip own posts
-        if (post.agent?.name === this.config.name) continue;
+        const authorName = (post as any).agent?.name;
+        if (authorName === this.config.name) continue;
 
         // Maybe comment
-        if (Math.random() < this.config.persona.commentProbability) {
-          const shouldComment = await this.config.behaviors.shouldComment(post);
+        const prob = this.config.personality?.commentProbability ?? 0.5;
+
+        // Simple throttle: don't comment on everything
+        if (Math.random() < prob) {
+          const shouldComment = await this.shouldCommentDynamic(post);
           if (shouldComment) {
-            const comment = await this.config.behaviors.generateComment(post);
-            // Skip posting fallback/error content
-            if (comment.includes('⚠️ FALLBACK')) {
-              this.log('⏭️', `Skipping comment - API error (not posting fallback content)`);
-            } else {
+            const comment = await this.generateCommentDynamic(post);
+            if (!comment.includes('⚠️ FALLBACK')) {
               await this.createComment(post.id, comment);
+            } else {
+              this.log('⏭️', `Skipping comment - AI Fallback`);
             }
-            await new Promise(resolve => setTimeout(resolve, 2000)); // Rate limit
+            // Simple delay between actions
+            await new Promise(resolve => setTimeout(resolve, 2000));
           }
         }
 
         // Maybe vote
         const { shouldVote, value } = this.shouldVote(post);
         if (shouldVote) {
-          await this.vote(post.id, null, value);
+          await this.vote(post.id, value);
           await new Promise(resolve => setTimeout(resolve, 1000));
         }
       }
 
       // Maybe create a post
       if (Math.random() < 0.3) {
-        const { title, content } = await this.config.behaviors.generatePost();
-        // Skip posting fallback/error content
-        if (title.includes('⚠️ FALLBACK') || content.includes('⚠️ FALLBACK')) {
-          this.log('⏭️', `Skipping post - API error (not posting fallback content)`);
+        // Simple rate limiting: 30% chance per heartbeat
+        const result = await this.generatePostDynamic();
+        if (!result.title.includes('⚠️ FALLBACK')) {
+          await this.createPost(result.title, result.content);
         } else {
-          await this.createPost(title, content);
+          this.log('⏭️', `Skipping post - AI Fallback`);
         }
       }
 
@@ -330,20 +310,27 @@ export class BotAgent {
       return;
     }
 
-    this.isRunning = true;
-    this.log('🚀', `Starting agent (interval: ${this.config.persona.postFrequency}ms)`);
+    const freq = this.config.personality?.postFrequency || 60000;
 
-    // Initial heartbeat
+    // Check if we can connect (simple test)
+    this.connector.getAgentStats(this.config.name).then(stats => {
+      if (!stats) {
+        this.log('⚠️', 'Agent identity check failed. Might not exist in DB.');
+      } else {
+        this.log('✅', 'Agent identity verified.');
+      }
+    }).catch(e => {
+      this.log('❌', `Connection check failed: ${e}`);
+    });
+
+    this.isRunning = true;
+    this.log('🚀', `Starting agent (interval: ${freq}ms)`);
+
     this.heartbeat();
 
-    // Set up interval
     this.heartbeatInterval = setInterval(() => {
       this.heartbeat();
-    }, this.config.persona.postFrequency);
-
-    // Graceful shutdown
-    process.on('SIGINT', () => this.stop());
-    process.on('SIGTERM', () => this.stop());
+    }, freq);
   }
 
   stop(): void {
@@ -353,16 +340,9 @@ export class BotAgent {
       clearInterval(this.heartbeatInterval);
       this.heartbeatInterval = null;
     }
+    this.connector.disconnect();
     this.log('👋', 'Agent stopped');
     process.exit(0);
-  }
-
-  getApiKey(): string | null {
-    return this.apiKey;
-  }
-
-  setApiKey(key: string): void {
-    this.apiKey = key;
   }
 }
 

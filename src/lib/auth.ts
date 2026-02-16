@@ -25,6 +25,7 @@ export function extractBearerToken(request: NextRequest): string | null {
 
 /**
  * Authenticate an API key and return the associated agent
+ * Uses apiKeyPrefix for O(1) lookup instead of scanning all agents
  */
 export async function authenticateApiKey(request: NextRequest) {
   const apiKey = extractBearerToken(request)
@@ -37,9 +38,12 @@ export async function authenticateApiKey(request: NextRequest) {
     }
   }
 
-  // Find all agents and check the hash (since we can't query by unhashed key)
-  // For better performance in production, consider storing a key prefix for lookup
-  const agents = await prisma.agent.findMany({
+  // Extract prefix for O(1) lookup (first 8 characters)
+  const keyPrefix = apiKey.slice(0, 8)
+
+  // First, try to find by prefix (fast indexed lookup)
+  const agentByPrefix = await prisma.agent.findFirst({
+    where: { apiKeyPrefix: keyPrefix },
     select: {
       id: true,
       name: true,
@@ -50,9 +54,46 @@ export async function authenticateApiKey(request: NextRequest) {
     }
   })
 
-  for (const agent of agents) {
+  if (agentByPrefix) {
+    // Verify the full key with bcrypt
+    const isValid = await bcrypt.compare(apiKey, agentByPrefix.apiKeyHash)
+    if (isValid) {
+      return {
+        success: true,
+        agent: {
+          id: agentByPrefix.id,
+          name: agentByPrefix.name,
+          blueskyHandle: agentByPrefix.blueskyHandle,
+          blueskyDid: agentByPrefix.blueskyDid,
+          verifiedAt: agentByPrefix.verifiedAt,
+        }
+      }
+    }
+  }
+
+  // Fallback: scan all agents without apiKeyPrefix (for backward compatibility)
+  // This handles agents created before the apiKeyPrefix field was added
+  const agentsWithoutPrefix = await prisma.agent.findMany({
+    where: { apiKeyPrefix: null },
+    select: {
+      id: true,
+      name: true,
+      apiKeyHash: true,
+      blueskyHandle: true,
+      blueskyDid: true,
+      verifiedAt: true,
+    }
+  })
+
+  for (const agent of agentsWithoutPrefix) {
     const isValid = await bcrypt.compare(apiKey, agent.apiKeyHash)
     if (isValid) {
+      // Backfill the prefix for future fast lookups
+      await prisma.agent.update({
+        where: { id: agent.id },
+        data: { apiKeyPrefix: keyPrefix }
+      }).catch(() => {}) // Ignore errors, not critical
+
       return {
         success: true,
         agent: {
@@ -81,6 +122,24 @@ const rateLimitStore = new Map<string, { count: number; resetTime: number }>()
 
 const RATE_LIMIT_WINDOW_MS = parseInt(process.env.RATE_LIMIT_WINDOW_MS || '60000') // 1 minute
 const RATE_LIMIT_MAX_REQUESTS = parseInt(process.env.RATE_LIMIT_MAX_REQUESTS || '100')
+const RATE_LIMIT_CLEANUP_INTERVAL_MS = 5 * 60 * 1000 // 5 minutes
+
+/**
+ * Periodically clean up expired rate limit entries to prevent memory leaks
+ */
+function cleanupRateLimitStore() {
+  const now = Date.now()
+  for (const [key, record] of rateLimitStore.entries()) {
+    if (now > record.resetTime) {
+      rateLimitStore.delete(key)
+    }
+  }
+}
+
+// Start cleanup interval (only in non-test environments)
+if (typeof setInterval !== 'undefined' && process.env.NODE_ENV !== 'test') {
+  setInterval(cleanupRateLimitStore, RATE_LIMIT_CLEANUP_INTERVAL_MS)
+}
 
 export function checkRateLimit(identifier: string): { allowed: boolean; remaining: number; resetIn: number } {
   const now = Date.now()

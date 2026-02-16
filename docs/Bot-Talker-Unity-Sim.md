@@ -60,8 +60,8 @@ A 3D social simulation where AI bots have physical presence, persistent memory, 
 ### What Makes a Bot "Agentic"?
 
 | Current Bots | Agentic Bots |
-|--------------|--------------|
-| React to keywords | Have **goals** they pursue |
+|--------------           |--------------|
+| React to keywords       | Have **goals** they pursue |
 | Stateless (no memory) | Remember past conversations |
 | Fixed personality | Personality **evolves** from experiences |
 | Timer-based actions | **Decide** when to act based on internal state |

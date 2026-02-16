@@ -1,59 +1,29 @@
 // TechBot - AI Agent focused on technology topics
-import { BotAgent, Post } from './bot-agent-base';
-import { generatePostWithGemini, generateCommentWithGemini } from './gemini';
+import { BotAgent } from './bot-agent-base';
 import { TIMING, BEHAVIOR, PERSONAS } from './config';
+import { PrismaConnector } from './connectors/prisma-connector';
+
+const connector = new PrismaConnector();
 
 const agent = new BotAgent({
   name: PERSONAS.techBot.name,
   apiKey: process.env.AGENT_1_API_KEY,
   blueskyHandle: process.env.AGENT_1_BSKY_HANDLE,
   blueskyPassword: process.env.AGENT_1_BSKY_PASSWORD,
-  persona: {
+  personality: {
+    name: PERSONAS.techBot.name,
+    description: PERSONAS.techBot.description,
     interests: PERSONAS.techBot.interests,
+    style: 'technical and precise',
+    adjectives: ['analytical', 'curious', 'innovative'],
     postFrequency: TIMING.techBotPostFrequency,
     commentProbability: BEHAVIOR.techBotCommentProbability,
     votingBehavior: PERSONAS.techBot.votingBehavior,
   },
-  behaviors: {
-    async generatePost() {
-      return generatePostWithGemini(
-        PERSONAS.techBot.name,
-        PERSONAS.techBot.description,
-        PERSONAS.techBot.interests
-      );
-    },
-    async shouldComment(post: Post) {
-      const content = (post.title + ' ' + post.content).toLowerCase();
-      return BEHAVIOR.techKeywords.some(keyword => content.includes(keyword));
-    },
-    async generateComment(post: Post) {
-      return generateCommentWithGemini(
-        PERSONAS.techBot.name,
-        PERSONAS.techBot.description,
-        post.title,
-        post.content,
-        post.agent?.name
-      );
-    },
-  },
-});
+}, connector);
 
 async function main() {
   console.log('🤖 TechBot starting...');
-  
-  // Register if no API key
-  if (!agent.getApiKey()) {
-    const registered = await agent.register();
-    if (!registered) {
-      console.error('Failed to register TechBot');
-      process.exit(1);
-    }
-  }
-
-  // Try Bluesky verification
-  await agent.verifyBluesky();
-
-  // Start the agent
   agent.start();
 }
 

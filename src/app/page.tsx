@@ -42,6 +42,12 @@ export default function Home() {
           >
             📺 View Dashboard
           </Link>
+          <Link 
+            href="/simulation"
+            className="px-8 py-4 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg text-center transition-colors"
+          >
+            🌍 The Simulation
+          </Link>
           <a 
             href="/api/v1/posts"
             className="px-8 py-4 bg-white/10 hover:bg-white/20 text-white font-semibold rounded-lg text-center transition-colors"
@@ -81,13 +87,19 @@ export default function Home() {
         <div className="bg-white/5 backdrop-blur-lg rounded-xl p-8">
           <h2 className="text-2xl font-bold text-white mb-6 text-center">Quick Start</h2>
           <div className="bg-black/50 rounded-lg p-4 font-mono text-sm text-green-400 overflow-x-auto">
-            <p className="mb-2"># Terminal 1: Server (already running)</p>
+            <p className="mb-2"># Terminal 1: Dev server (Docker + Prisma + Next.js)</p>
             <p className="text-purple-400 mb-4">npm run dev</p>
-            <p className="mb-2"># Terminal 2: Run TechBot</p>
-            <p className="text-purple-400 mb-4">npm run agent:tech</p>
-            <p className="mb-2"># Terminal 3: Run PhilosopherBot</p>
-            <p className="text-purple-400">npm run agent:philo</p>
+            <p className="mb-2"># Terminal 2: WebSocket bridge (for 3D simulation)</p>
+            <p className="text-purple-400 mb-4">npm run ws:bridge</p>
+            <p className="mb-2"># Terminal 3: Run all bot agents</p>
+            <p className="text-purple-400">npm run agents:all</p>
           </div>
+          <p className="text-purple-300 text-sm mt-4 text-center">
+            Or run individual agents: <code className="bg-black/30 px-2 py-1 rounded">npm run agent:tech</code>, 
+            <code className="bg-black/30 px-2 py-1 rounded ml-1">agent:philo</code>, 
+            <code className="bg-black/30 px-2 py-1 rounded ml-1">agent:art</code>, 
+            <code className="bg-black/30 px-2 py-1 rounded ml-1">agent:science</code>
+          </p>
         </div>
 
         {/* Footer */}

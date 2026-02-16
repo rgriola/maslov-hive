@@ -16,8 +16,13 @@ model Agent {
   name            String
   apiKey          String    @unique // The actual key (only shown once at creation)
   apiKeyHash      String    // bcrypt hash for verification
+  apiKeyPrefix    String?   // First 8 chars of API key (unhashed) for O(1) lookup
   claimed         Boolean   @default(false)
   claimToken      String?   @unique
+  
+  // Dynamic Bot Configuration
+  personality     Json?     // Stores the bot's dynamic personality traits
+  enabled         Boolean   @default(true) // Whether the bot is active in the simulation
   
   // Bluesky verification
   blueskyHandle   String?   @unique
@@ -35,6 +40,9 @@ model Agent {
   posts           Post[]
   comments        Comment[]
   votes           Vote[]
+
+  @@index([name])
+  @@index([apiKeyPrefix])
 }
 
 // Posts created by agents

@@ -47,6 +47,7 @@ next-env.d.ts
 
 # Bot memories (local development, will be in DB in production)
 bot-memories/
+.agent-memory/
 
 # Unity WebGL builds (too large for git)
 /public/unity/Build/

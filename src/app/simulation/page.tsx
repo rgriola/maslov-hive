@@ -1,8 +1,71 @@
 'use client';
 
-import { useEffect, useRef, useCallback, useState, useMemo } from 'react';
+import { useEffect, useRef, useCallback, useState, useMemo, ReactNode } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+
+// ─── Content Renderer (handles markdown-style links and citations) ───
+
+function renderContentWithLinks(content: string): ReactNode[] {
+  const elements: ReactNode[] = [];
+  let key = 0;
+  
+  // Pattern to match: ***text*** for bold italic, and [text](url) for links
+  const combinedPattern = /(\*{3}[^*]+\*{3})|(\[[^\]]+\]\([^)]+\))/g;
+  
+  let lastIndex = 0;
+  let match;
+  
+  while ((match = combinedPattern.exec(content)) !== null) {
+    // Add text before match
+    if (match.index > lastIndex) {
+      elements.push(<span key={key++}>{content.slice(lastIndex, match.index)}</span>);
+    }
+    
+    const matched = match[0];
+    
+    if (matched.startsWith('***') && matched.endsWith('***')) {
+      // Bold italic: ***text***
+      const innerText = matched.slice(3, -3);
+      elements.push(
+        <strong key={key++} style={{ fontStyle: 'italic', color: '#4a9eff' }}>
+          {innerText}
+        </strong>
+      );
+    } else if (matched.startsWith('[')) {
+      // Link: [text](url)
+      const linkMatch = matched.match(/\[([^\]]+)\]\(([^)]+)\)/);
+      if (linkMatch) {
+        const [, linkText, url] = linkMatch;
+        elements.push(
+          <a
+            key={key++}
+            href={url}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{
+              color: '#60a5fa',
+              textDecoration: 'underline',
+              textDecorationStyle: 'dotted',
+              cursor: 'pointer',
+            }}
+          >
+            {linkText}
+          </a>
+        );
+      }
+    }
+    
+    lastIndex = match.index + matched.length;
+  }
+  
+  // Add remaining text
+  if (lastIndex < content.length) {
+    elements.push(<span key={key++}>{content.slice(lastIndex)}</span>);
+  }
+  
+  return elements.length > 0 ? elements : [<span key={0}>{content}</span>];
+}
 
 // ─── Types ───────────────────────────────────────────────────────
 
@@ -27,6 +90,8 @@ interface BotEntity {
   speechBubble: HTMLDivElement;
   targetPos: THREE.Vector3;
   data: BotData;
+  postCount: number;       // Track number of posts
+  recentPost?: ActivityMessage;  // Most recent post for click display
 }
 
 interface ActivityMessage {
@@ -52,6 +117,17 @@ interface PostDetail {
   upvotes: number;
   downvotes: number;
   commentCount: number;
+}
+
+interface SelectedBotInfo {
+  botId: string;
+  botName: string;
+  personality: string;
+  postCount: number;
+  color: string;
+  state: string;
+  height?: number;
+  lastPostTime?: string;
 }
 
 // ─── Personality → Visual Config ─────────────────────────────────
@@ -109,6 +185,9 @@ export default function SimulationPage() {
   const sunLightRef = useRef<THREE.DirectionalLight | null>(null);
   const moonLightRef = useRef<THREE.DirectionalLight | null>(null);
   const ambientLightRef = useRef<THREE.AmbientLight | null>(null);
+  // Raycaster for click detection
+  const raycasterRef = useRef<THREE.Raycaster | null>(null);
+  const mouseRef = useRef<THREE.Vector2>(new THREE.Vector2());
   const [activityFeed, setActivityFeed] = useState<ActivityMessage[]>([]);
   const activityRef = useRef(setActivityFeed);  // ref relay for useEffect
   const feedRef = useRef<HTMLDivElement>(null);
@@ -116,6 +195,7 @@ export default function SimulationPage() {
   const [selectedPost, setSelectedPost] = useState<ActivityMessage | null>(null);
   const [postDetail, setPostDetail] = useState<PostDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [selectedBotInfo, setSelectedBotInfo] = useState<SelectedBotInfo | null>(null);
   const [currentTime, setCurrentTime] = useState<Date>(new Date());
   const [location, setLocation] = useState<{ lat: number; lng: number } | null>(null);
 
@@ -252,11 +332,11 @@ export default function SimulationPage() {
     // Panel colors transition from dark (night) to light (day)
     const panelBg = `rgba(${Math.round(10 + dayFactor * 230)}, ${Math.round(10 + dayFactor * 230)}, ${Math.round(26 + dayFactor * 220)}, ${0.95 - dayFactor * 0.15})`;
     const borderColor = `rgba(${Math.round(74 + dayFactor * 100)}, ${Math.round(158 + dayFactor * 50)}, ${Math.round(255 - dayFactor * 50)}, ${0.15 + dayFactor * 0.2})`;
-    const textPrimary = dayFactor > 0.5 ? '#333' : '#e0e0ff';
-    const textSecondary = dayFactor > 0.5 ? '#666' : '#8888cc';
-    const textMuted = dayFactor > 0.5 ? '#888' : '#555';
-    const cardBg = dayFactor > 0.5 ? 'rgba(0,0,0,0.05)' : 'rgba(255,255,255,0.03)';
-    const cardBgHover = dayFactor > 0.5 ? 'rgba(74,158,255,0.15)' : 'rgba(74,158,255,0.1)';
+    const textPrimary = dayFactor > 0.5 ? '#333' : '#f0f0ff';
+    const textSecondary = dayFactor > 0.5 ? '#555' : '#b0b0dd';
+    const textMuted = dayFactor > 0.5 ? '#777' : '#9999bb';
+    const cardBg = dayFactor > 0.5 ? 'rgba(0,0,0,0.05)' : 'rgba(255,255,255,0.05)';
+    const cardBgHover = dayFactor > 0.5 ? 'rgba(74,158,255,0.15)' : 'rgba(74,158,255,0.12)';
     
     return { panelBg, borderColor, textPrimary, textSecondary, textMuted, cardBg, cardBgHover, dayFactor };
   }, [currentTime, location, calculateSunPosition]);
@@ -347,6 +427,45 @@ export default function SimulationPage() {
     }
   }, []);
 
+  // ─── Dynamic Ground Sizing Based on Bot Count ────────────────
+  const calculateGroundSize = useCallback((botCount: number): number => {
+    // 75 square meters per bot
+    // Side length = √(botCount × 75)
+    const SQUARE_METERS_PER_BOT = 75;
+    const MIN_SIZE = 10; // minimum 10x10 for empty world
+    
+    const area = Math.max(1, botCount) * SQUARE_METERS_PER_BOT;
+    const size = Math.sqrt(area);
+    return Math.max(MIN_SIZE, Math.round(size));
+  }, []);
+
+  const resizeGroundForBots = useCallback(() => {
+    const scene = sceneRef.current;
+    if (!scene || !groundRef.current || !gridRef.current) return;
+
+    const botCount = botsRef.current.size;
+    const size = calculateGroundSize(botCount);
+    
+    // Only resize if size changed significantly (avoid constant updates)
+    const currentSize = (groundRef.current.geometry as THREE.PlaneGeometry).parameters.width;
+    if (Math.abs(currentSize - size) < 2) return;
+
+    // Resize ground
+    groundRef.current.geometry.dispose();
+    groundRef.current.geometry = new THREE.PlaneGeometry(size, size);
+
+    // Resize grid
+    scene.remove(gridRef.current);
+    gridRef.current.geometry.dispose();
+    gridRef.current.material.dispose();
+    const newGrid = new THREE.GridHelper(size, Math.round(size), 0x1a6b2a, 0x238636);
+    newGrid.position.y = 0.01;
+    scene.add(newGrid);
+    gridRef.current = newGrid;
+
+    console.log(`[Simulation] Resized ground to ${size}x${size} for ${botCount} bots`);
+  }, [calculateGroundSize]);
+
   // ─── Create Bot 3D Entity ────────────────────────────────────
 
   const createBot = useCallback((data: BotData) => {
@@ -417,6 +536,9 @@ export default function SimulationPage() {
     speechBubble.style.display = 'none';
     labelsContainer.appendChild(speechBubble);
 
+    // Store botId on mesh for raycasting click detection
+    mesh.userData = { botId: data.botId };
+
     const entity: BotEntity = {
       group,
       mesh,
@@ -424,10 +546,15 @@ export default function SimulationPage() {
       speechBubble,
       targetPos: new THREE.Vector3(data.x, h / 2, data.z),
       data,
+      postCount: 0,
+      recentPost: undefined,
     };
 
     botsRef.current.set(data.botId, entity);
-  }, []);
+    
+    // Resize ground based on new bot count
+    resizeGroundForBots();
+  }, [resizeGroundForBots]);
 
   // ─── Show Speech Bubble ──────────────────────────────────────
 
@@ -478,6 +605,10 @@ export default function SimulationPage() {
     container.appendChild(renderer.domElement);
     rendererRef.current = renderer;
 
+    // ─── Raycaster for Click Detection ─────────────────
+    const raycaster = new THREE.Raycaster();
+    raycasterRef.current = raycaster;
+
     // ─── Controls ──────────────────────────────────────
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
@@ -488,8 +619,8 @@ export default function SimulationPage() {
     controls.target.set(0, 0, 0);
     controlsRef.current = controls;
 
-    // ─── Ground (sized dynamically from WebSocket worldConfig) ───
-    const defaultSize = 30; // initial default; resized when bridge sends config
+    // ─── Ground (sized dynamically based on bot count) ───
+    const defaultSize = 20; // initial default; auto-resized when bots are added
     const groundGeo = new THREE.PlaneGeometry(defaultSize, defaultSize);
     const groundMat = new THREE.MeshStandardMaterial({
       color: 0x2d8c3c,
@@ -618,6 +749,96 @@ export default function SimulationPage() {
     }
     window.addEventListener('resize', onResize);
 
+    // ─── Click Handler for Bot Selection ───────────────
+    function onCanvasClick(event: MouseEvent) {
+      if (!raycasterRef.current || !cameraRef.current) return;
+      
+      // Calculate mouse position in normalized device coordinates
+      const rect = renderer.domElement.getBoundingClientRect();
+      mouseRef.current.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+      mouseRef.current.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+      
+      // Update raycaster
+      raycasterRef.current.setFromCamera(mouseRef.current, camera);
+      
+      // Get all bot meshes
+      const botMeshes: THREE.Mesh[] = [];
+      for (const entity of botsRef.current.values()) {
+        botMeshes.push(entity.mesh);
+      }
+      
+      // Check for intersections
+      const intersects = raycasterRef.current.intersectObjects(botMeshes, false);
+      
+      if (intersects.length > 0) {
+        const clickedMesh = intersects[0].object as THREE.Mesh;
+        const botId = clickedMesh.userData.botId;
+        
+        if (botId) {
+          const entity = botsRef.current.get(botId);
+          
+          // Set selected bot info for metrics panel
+          if (entity) {
+            const visual = BOT_VISUALS[entity.data.personality] || BOT_VISUALS.tech;
+            setSelectedBotInfo({
+              botId: entity.data.botId,
+              botName: entity.data.botName,
+              personality: entity.data.personality,
+              postCount: entity.postCount,
+              color: entity.data.color || `#${visual.color.toString(16).padStart(6, '0')}`,
+              state: entity.data.state,
+              height: entity.data.height,
+              lastPostTime: entity.recentPost?.time,
+            });
+          }
+          
+          if (entity && entity.recentPost) {
+            // Show recent post in speech bubble
+            entity.speechBubble.textContent = entity.recentPost.text;
+            entity.speechBubble.style.display = 'block';
+            
+            // Auto-hide after 8 seconds
+            setTimeout(() => {
+              entity.speechBubble.style.display = 'none';
+            }, 8000);
+            
+            // Select in detail panel
+            setSelectedPost(entity.recentPost);
+            setPostDetail(null);
+            
+            // Fetch post details if we have a postId
+            if (entity.recentPost.postId) {
+              setDetailLoading(true);
+              Promise.all([
+                fetch(`/api/v1/comments?postId=${entity.recentPost.postId}`).then(r => r.json()),
+                fetch(`/api/v1/posts?limit=100`).then(r => r.json()),
+              ]).then(([commentsData, postsData]) => {
+                const comments = commentsData.data?.comments || commentsData.comments || [];
+                const posts = postsData.data?.posts || postsData.posts || [];
+                const match = posts.find((p: { id: string }) => p.id === entity.recentPost!.postId);
+                setPostDetail({
+                  comments,
+                  score: match?.score || 0,
+                  upvotes: match?.upvotes || 0,
+                  downvotes: match?.downvotes || 0,
+                  commentCount: comments.length,
+                });
+                setDetailLoading(false);
+              }).catch(() => setDetailLoading(false));
+            }
+          } else if (entity) {
+            // No posts yet - show message
+            entity.speechBubble.textContent = '🤔 No posts yet...';
+            entity.speechBubble.style.display = 'block';
+            setTimeout(() => {
+              entity.speechBubble.style.display = 'none';
+            }, 3000);
+          }
+        }
+      }
+    }
+    renderer.domElement.addEventListener('click', onCanvasClick);
+
     // ─── WebSocket Connection ──────────────────────────
     let reconnectTimer: ReturnType<typeof setTimeout>;
     let disposed = false;
@@ -678,16 +899,26 @@ export default function SimulationPage() {
             case 'bot:speak': {
               showSpeechBubble(msg.data.botId, msg.data.title);
               const bot = botsRef.current.get(msg.data.botId);
+              const activityMsg: ActivityMessage = {
+                id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+                postId: msg.data.postId || undefined,
+                botName: msg.data.botName,
+                botColor: bot?.data.color || '#888',
+                text: msg.data.title || msg.data.content?.substring(0, 80),
+                content: msg.data.content || '',
+                time: new Date().toLocaleTimeString(),
+              };
+              
+              // Update bot's post count and recent post
+              if (bot) {
+                bot.postCount += 1;
+                bot.recentPost = activityMsg;
+                const visual = BOT_VISUALS[bot.data.personality] || BOT_VISUALS.tech;
+                bot.label.innerHTML = `${visual.emoji} ${bot.data.botName} <span style="opacity:0.7;font-size:0.8em">💡${bot.postCount}</span>`;
+              }
+              
               activityRef.current(prev => {
-                const next = [{
-                  id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-                  postId: msg.data.postId || undefined,
-                  botName: msg.data.botName,
-                  botColor: bot?.data.color || '#888',
-                  text: msg.data.title || msg.data.content?.substring(0, 80),
-                  content: msg.data.content || '',
-                  time: new Date().toLocaleTimeString(),
-                }, ...prev];
+                const next = [activityMsg, ...prev];
                 return next.slice(0, 50);
               });
               break;
@@ -724,6 +955,7 @@ export default function SimulationPage() {
       disposed = true;
       cancelAnimationFrame(rafId);
       window.removeEventListener('resize', onResize);
+      renderer.domElement.removeEventListener('click', onCanvasClick);
       clearTimeout(reconnectTimer);
       if (wsRef.current) {
         wsRef.current.onclose = null; // prevent reconnect on intentional close
@@ -909,9 +1141,27 @@ export default function SimulationPage() {
                   textOverflow: 'ellipsis',
                   whiteSpace: 'nowrap' as const,
                   transition: 'color 0.5s',
+                  fontWeight: 600,
                 }}>
                   {msg.text}
                 </div>
+                {/* Content preview with citations */}
+                {msg.content && (
+                  <div style={{
+                    color: uiTheme.textSecondary,
+                    fontSize: '11px',
+                    lineHeight: '1.4',
+                    marginTop: '4px',
+                    wordBreak: 'break-word' as const,
+                    display: '-webkit-box',
+                    WebkitLineClamp: 2,
+                    WebkitBoxOrient: 'vertical' as const,
+                    overflow: 'hidden',
+                    transition: 'color 0.5s',
+                  }}>
+                    {renderContentWithLinks(msg.content.length > 150 ? msg.content.substring(0, 150) + '...' : msg.content)}
+                  </div>
+                )}
               </div>
             ))}
           </div>
@@ -940,6 +1190,140 @@ export default function SimulationPage() {
         >
           💬
         </button>
+      )}
+
+      {/* Bot Metrics Panel (upper left corner) */}
+      {selectedBotInfo && (
+        <div
+          style={{
+            position: 'absolute',
+            top: '100px',
+            left: showFeed ? '288px' : '8px',
+            width: '215px',
+            background: uiTheme.panelBg,
+            border: `1px solid ${uiTheme.borderColor}`,
+            borderRadius: '10px',
+            zIndex: 15,
+            fontFamily: "'Inter', system-ui, sans-serif",
+            backdropFilter: 'blur(10px)',
+            padding: '12px',
+            boxShadow: '0 4px 20px rgba(0,0,0,0.3)',
+            transition: 'left 0.3s, background 0.5s, border-color 0.5s',
+          }}
+        >
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+            <span style={{ color: uiTheme.textSecondary, fontSize: '10px', letterSpacing: '1px', textTransform: 'uppercase' as const }}>
+              📊 Bot Metrics
+            </span>
+            <button
+              onClick={() => setSelectedBotInfo(null)}
+              style={{
+                color: uiTheme.textMuted,
+                background: 'none',
+                border: 'none',
+                cursor: 'pointer',
+                fontSize: '14px',
+                padding: '0',
+              }}
+            >
+              ✕
+            </button>
+          </div>
+          
+          <div style={{ 
+            display: 'flex', 
+            alignItems: 'center', 
+            gap: '8px', 
+            marginBottom: '12px',
+            padding: '8px',
+            background: 'rgba(255,255,255,0.05)',
+            borderRadius: '8px',
+            borderLeft: `3px solid ${selectedBotInfo.color}`,
+          }}>
+            <span style={{ fontSize: '24px' }}>
+              {BOT_VISUALS[selectedBotInfo.personality]?.emoji || '🤖'}
+            </span>
+            <div>
+              <div style={{ color: selectedBotInfo.color, fontWeight: 600, fontSize: '14px' }}>
+                {selectedBotInfo.botName}
+              </div>
+              <div style={{ color: uiTheme.textMuted, fontSize: '10px', textTransform: 'capitalize' as const }}>
+                {selectedBotInfo.personality}
+              </div>
+            </div>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px' }}>
+            <div style={{ 
+              background: 'rgba(74, 158, 255, 0.1)', 
+              padding: '8px', 
+              borderRadius: '6px',
+              textAlign: 'center' as const,
+            }}>
+              <div style={{ color: '#4a9eff', fontSize: '18px', fontWeight: 700 }}>
+                {selectedBotInfo.postCount}
+              </div>
+              <div style={{ color: uiTheme.textMuted, fontSize: '9px', textTransform: 'uppercase' as const }}>
+                Posts
+              </div>
+            </div>
+            <div style={{ 
+              background: 'rgba(255, 152, 0, 0.1)', 
+              padding: '8px', 
+              borderRadius: '6px',
+              textAlign: 'center' as const,
+            }}>
+              <div style={{ color: '#ff9800', fontSize: '14px', fontWeight: 700 }}>
+                {selectedBotInfo.height ? `${selectedBotInfo.height.toFixed(2)}m` : '—'}
+              </div>
+              <div style={{ color: uiTheme.textMuted, fontSize: '9px', textTransform: 'uppercase' as const }}>
+                Height
+              </div>
+            </div>
+            <div style={{ 
+              background: 'rgba(76, 175, 80, 0.1)', 
+              padding: '8px', 
+              borderRadius: '6px',
+              textAlign: 'center' as const,
+            }}>
+              <div style={{ 
+                color: selectedBotInfo.state === 'posting' ? '#fbbf24' : '#4caf50', 
+                fontSize: '11px', 
+                fontWeight: 600,
+                textTransform: 'capitalize' as const,
+              }}>
+                {selectedBotInfo.state || 'idle'}
+              </div>
+              <div style={{ color: uiTheme.textMuted, fontSize: '9px', textTransform: 'uppercase' as const }}>
+                Status
+              </div>
+            </div>
+          </div>
+
+          {selectedBotInfo.lastPostTime && (
+            <div style={{ 
+              marginTop: '10px', 
+              padding: '6px 8px',
+              background: 'rgba(255,255,255,0.03)',
+              borderRadius: '6px',
+              fontSize: '10px',
+              color: uiTheme.textMuted,
+            }}>
+              <span style={{ opacity: 0.7 }}>Last active:</span>{' '}
+              <span style={{ color: uiTheme.textSecondary }}>{selectedBotInfo.lastPostTime}</span>
+            </div>
+          )}
+
+          <div style={{ 
+            marginTop: '10px', 
+            fontSize: '9px', 
+            color: uiTheme.textMuted,
+            fontFamily: 'monospace',
+            opacity: 0.6,
+          }}>
+            ID: {selectedBotInfo.botId.substring(0, 8)}...
+          </div>
+        </div>
       )}
 
       {/* Post Detail Panel (right side) */}
@@ -1028,33 +1412,31 @@ export default function SimulationPage() {
               </h3>
             )}
             <div style={{
-              color: uiTheme.dayFactor > 0.5 ? '#555' : '#bbb',
+              color: uiTheme.dayFactor > 0.5 ? '#555' : '#ccc',
               fontSize: '13px',
               lineHeight: '1.7',
               whiteSpace: 'pre-wrap' as const,
               wordBreak: 'break-word' as const,
               transition: 'color 0.5s',
             }}>
-              {selectedPost.content}
+              {renderContentWithLinks(selectedPost.content)}
             </div>
 
             {/* Votes */}
             {postDetail && (
               <div style={{
                 display: 'flex',
-                gap: '16px',
+                gap: '20px',
                 marginTop: '16px',
-                padding: '10px 0',
+                padding: '12px 0',
                 borderTop: `1px solid ${uiTheme.borderColor}`,
-                fontSize: '13px',
+                fontSize: '14px',
+                fontWeight: 500,
               }}>
-                <span style={{ color: postDetail.score > 0 ? '#4ade80' : postDetail.score < 0 ? '#f87171' : uiTheme.textMuted }}>
-                  ⬆️ {postDetail.score} votes
-                </span>
-                <span style={{ color: uiTheme.textMuted }}>
+                <span style={{ color: '#4ade80' }}>
                   👍 {postDetail.upvotes}
                 </span>
-                <span style={{ color: uiTheme.textMuted }}>
+                <span style={{ color: '#f87171' }}>
                   👎 {postDetail.downvotes}
                 </span>
               </div>
@@ -1104,14 +1486,14 @@ export default function SimulationPage() {
                       </span>
                     </div>
                     <div style={{
-                      color: uiTheme.dayFactor > 0.5 ? '#555' : '#bbb',
+                      color: uiTheme.dayFactor > 0.5 ? '#555' : '#ccc',
                       fontSize: '12px',
                       lineHeight: '1.5',
                       whiteSpace: 'pre-wrap' as const,
                       wordBreak: 'break-word' as const,
                       transition: 'color 0.5s',
                     }}>
-                      {comment.content}
+                      {renderContentWithLinks(comment.content)}
                     </div>
                   </div>
                 ))}
@@ -1164,11 +1546,12 @@ export default function SimulationPage() {
       </div>
 
       {/* Controls hint */}
+      {/* View Controls Instructions - positioned left of detail panel */}
       <div
         style={{
           position: 'absolute',
           bottom: '20px',
-          right: '20px',
+          right: selectedPost ? '360px' : '20px',
           background: 'rgba(10,10,26,0.85)',
           border: '1px solid rgba(74,158,255,0.2)',
           borderRadius: '12px',
@@ -1179,11 +1562,13 @@ export default function SimulationPage() {
           color: '#666',
           fontSize: '11px',
           lineHeight: '1.6',
+          transition: 'right 0.2s ease',
         }}
       >
         <span style={{ color: '#888' }}>🖱️ Drag</span> rotate &nbsp;·&nbsp;
         <span style={{ color: '#888' }}>⚙️ Scroll</span> zoom &nbsp;·&nbsp;
-        <span style={{ color: '#888' }}>Right-Drag</span> pan
+        <span style={{ color: '#888' }}>Right-Drag</span> pan &nbsp;·&nbsp;
+        <span style={{ color: '#888' }}>Click</span> bot
       </div>
 
       {/* Labels container */}

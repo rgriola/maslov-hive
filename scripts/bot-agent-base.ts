@@ -7,7 +7,25 @@ import * as path from 'path';
 
 import { Personality } from './config';
 import { WorldConnector } from './connectors/interface';
+import { PrismaConnector } from './connectors/prisma-connector';
 import { Post } from '@prisma/client';
+
+// Import new modules for enhanced bot behavior
+import { 
+  loadMemory, 
+  recordPost, 
+  recordComment, 
+  recordVote, 
+  formatMemoryForPrompt,
+  getInteractedPostIds 
+} from './bot-memory';
+import { 
+  searchWeb, 
+  generateSearchQuery, 
+  formatSearchResultsForPrompt,
+  injectCitationUrls,
+  SearchResponse
+} from './web-search';
 
 interface AgentConfig {
   name: string;
@@ -40,7 +58,13 @@ interface ApiResponse<T> {
   error?: string;
 }
 
-import { generatePostWithGemini, generateCommentWithGemini, shouldCommentWithGemini } from './gemini';
+import { 
+  generatePostWithGemini, 
+  generateCommentWithGemini, 
+  shouldCommentWithGemini,
+  generateThreadReplyWithGemini,
+  PostGenerationOptions
+} from './gemini';
 
 export class BotAgent {
   private config: AgentConfig;
@@ -125,6 +149,10 @@ export class BotAgent {
     try {
       const post = await this.connector.createPost(this.config.name, title, content);
       this.log('✅', `Post created: ${post.id}`);
+      
+      // Record to memory for future reference
+      recordPost(this.config.name, title, content);
+      
       return post;
     } catch (error) {
       this.log('❌', `Failed to create post: ${error}`);
@@ -137,6 +165,10 @@ export class BotAgent {
     try {
       await this.connector.createComment(this.config.name, postId, content);
       this.log('✅', 'Comment created');
+      
+      // Record to memory
+      recordComment(this.config.name, content, postId);
+      
       return true;
     } catch (error) {
       this.log('❌', `Failed to comment: ${error}`);
@@ -150,6 +182,10 @@ export class BotAgent {
     try {
       await this.connector.votePost(this.config.name, postId, value);
       this.log('✅', 'Vote recorded');
+      
+      // Record to memory
+      recordVote(this.config.name, postId, value === 1);
+      
       return true;
     } catch (error) {
       this.log('❌', `Failed to vote: ${error}`);
@@ -192,12 +228,49 @@ export class BotAgent {
     }
 
     const personaDesc = `${this.config.personality.description}. Style: ${this.config.personality.style}.`;
+    
+    // Build post generation options with memory and optional research
+    const options: PostGenerationOptions = {};
+    let searchResults: SearchResponse | null = null;
+    
+    // Add memory context to avoid repetition
+    const memoryContext = formatMemoryForPrompt(this.config.name);
+    if (memoryContext) {
+      options.memoryContext = memoryContext;
+    }
+    
+    // 40% chance to do research for informed posts
+    if (Math.random() < 0.4) {
+      try {
+        const searchQuery = generateSearchQuery(
+          this.config.personality.interests[Math.floor(Math.random() * this.config.personality.interests.length)],
+          this.config.personality.interests
+        );
+        this.log('🔍', `Researching: "${searchQuery}"`);
+        
+        searchResults = await searchWeb(searchQuery);
+        if (searchResults.results.length > 0 || searchResults.abstract) {
+          options.researchContext = formatSearchResultsForPrompt(searchResults);
+          options.suggestedTopic = searchQuery;
+        }
+      } catch (error) {
+        this.log('⚠️', `Research failed: ${error}`);
+      }
+    }
 
-    return generatePostWithGemini(
+    const generated = await generatePostWithGemini(
       this.config.name,
       personaDesc,
-      this.config.personality.interests
+      this.config.personality.interests,
+      options
     );
+    
+    // Inject citation URLs if we have search results
+    if (searchResults && searchResults.results.length > 0) {
+      generated.content = injectCitationUrls(generated.content, searchResults);
+    }
+    
+    return generated;
   }
 
   private async shouldCommentDynamic(post: Post): Promise<boolean> {
@@ -249,10 +322,83 @@ export class BotAgent {
     );
   }
 
+  /**
+   * Check for and respond to replies on this bot's posts/comments
+   * This enables threaded conversations
+   */
+  private async handleThreadReplies(): Promise<void> {
+    // Only PrismaConnector supports getPendingReplies
+    if (!(this.connector instanceof PrismaConnector)) {
+      return;
+    }
+
+    try {
+      // Get IDs of comments we've already responded to
+      const memory = loadMemory(this.config.name);
+      const respondedIds = getInteractedPostIds(this.config.name);
+
+      const pendingReplies = await this.connector.getPendingReplies(this.config.name, respondedIds);
+
+      if (pendingReplies.length === 0) {
+        return;
+      }
+
+      this.log('💭', `Found ${pendingReplies.length} pending replies to respond to`);
+
+      // Respond to up to 2 replies per heartbeat to avoid spam
+      for (const reply of pendingReplies.slice(0, 2)) {
+        if (!this.config.personality) continue;
+
+        const personaDesc = `${this.config.personality.description}. Style: ${this.config.personality.style}.`;
+        const replyAuthor = reply.agent?.name || 'someone';
+
+        // Find what the bot originally said (post title or comment content)
+        let originalContent = '';
+        if (reply.post) {
+          // They replied to our post
+          originalContent = reply.post.title + ': ' + reply.post.content.substring(0, 200);
+        }
+
+        this.log('🔄', `Generating reply to ${replyAuthor}...`);
+
+        const responseText = await generateThreadReplyWithGemini(
+          this.config.name,
+          personaDesc,
+          originalContent,
+          reply.content,
+          replyAuthor
+        );
+
+        if (!responseText.includes('⚠️ FALLBACK')) {
+          // Create the threaded reply
+          await this.connector.createReply(
+            this.config.name,
+            reply.postId,
+            reply.id,  // Parent comment ID
+            responseText
+          );
+
+          // Record that we responded
+          recordComment(this.config.name, responseText, reply.id);
+
+          this.log('✅', `Replied to ${replyAuthor}`);
+        }
+
+        // Delay between replies
+        await new Promise(resolve => setTimeout(resolve, 3000));
+      }
+    } catch (error) {
+      this.log('⚠️', `Thread reply handling error: ${error}`);
+    }
+  }
+
   async heartbeat(): Promise<void> {
     this.log('💓', 'Heartbeat starting...');
 
     try {
+      // Check for and respond to thread replies first
+      await this.handleThreadReplies();
+
       const posts = await this.fetchFeed();
 
       // Process a few posts

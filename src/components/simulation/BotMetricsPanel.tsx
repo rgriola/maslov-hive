@@ -5,7 +5,7 @@
 
 import type { UiTheme, SelectedBotInfo } from '@/types/simulation';
 import { ensureContrastRatio } from '@/utils/color';
-import { BOT_VISUALS } from '@/config/bot-visuals';
+import { getPersonalityMeta } from '@/config/bot-visuals';
 import { NeedsMeter } from './NeedsMeter';
 
 export interface BotMetricsPanelProps {
@@ -42,7 +42,7 @@ export function BotMetricsPanel({
 }: BotMetricsPanelProps) {
   const botColorAdjusted = ensureContrastRatio(selectedBotInfo.color, uiTheme.panelBgHex, 3.0);
   const botColorText = ensureContrastRatio(selectedBotInfo.color, uiTheme.panelBgHex, 4.5);
-  const botVisual = BOT_VISUALS[selectedBotInfo.personality] || BOT_VISUALS.tech;
+  const meta = getPersonalityMeta(selectedBotInfo.personality);
 
   return (
     <div
@@ -63,10 +63,10 @@ export function BotMetricsPanel({
       }}
     >
       {/* Header */}
-      <div style={{ 
-        display: 'flex', 
-        justifyContent: 'space-between', 
-        alignItems: 'center', 
+      <div style={{
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
         marginBottom: '14px',
         paddingBottom: '10px',
         borderBottom: `1px solid ${uiTheme.borderColor}`,
@@ -89,12 +89,12 @@ export function BotMetricsPanel({
           ✕
         </button>
       </div>
-      
+
       {/* Bot Identity */}
-      <div style={{ 
-        display: 'flex', 
-        alignItems: 'center', 
-        gap: '12px', 
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: '12px',
         marginBottom: '16px',
         padding: '10px 12px',
         background: 'rgba(255,255,255,0.05)',
@@ -102,7 +102,7 @@ export function BotMetricsPanel({
         borderLeft: `5px solid ${botColorAdjusted}`,
       }}>
         <span style={{ fontSize: '28px', lineHeight: 1 }}>
-          {botVisual.emoji}
+          {meta.emoji}
         </span>
         <div>
           <div style={{ color: botColorText, fontWeight: 600, fontSize: '15px', marginBottom: '2px' }}>
@@ -116,9 +116,9 @@ export function BotMetricsPanel({
 
       {/* Stats Grid */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '10px', marginBottom: '14px' }}>
-        <div style={{ 
-          background: 'rgba(74, 158, 255, 0.1)', 
-          padding: '10px 8px', 
+        <div style={{
+          background: 'rgba(74, 158, 255, 0.1)',
+          padding: '10px 8px',
           borderRadius: '8px',
           textAlign: 'center' as const,
         }}>
@@ -129,9 +129,9 @@ export function BotMetricsPanel({
             Posts
           </div>
         </div>
-        <div style={{ 
-          background: 'rgba(255, 152, 0, 0.1)', 
-          padding: '10px 8px', 
+        <div style={{
+          background: 'rgba(255, 152, 0, 0.1)',
+          padding: '10px 8px',
           borderRadius: '8px',
           textAlign: 'center' as const,
         }}>
@@ -142,15 +142,15 @@ export function BotMetricsPanel({
             Height
           </div>
         </div>
-        <div style={{ 
-          background: 'rgba(76, 175, 80, 0.1)', 
-          padding: '10px 8px', 
+        <div style={{
+          background: 'rgba(76, 175, 80, 0.1)',
+          padding: '10px 8px',
           borderRadius: '8px',
           textAlign: 'center' as const,
         }}>
-          <div style={{ 
-            color: selectedBotInfo.state === 'posting' ? '#fbbf24' : '#4caf50', 
-            fontSize: '12px', 
+          <div style={{
+            color: selectedBotInfo.state === 'posting' ? '#fbbf24' : '#4caf50',
+            fontSize: '12px',
             fontWeight: 600,
             textTransform: 'capitalize' as const,
             marginBottom: '4px',
@@ -195,7 +195,7 @@ export function BotMetricsPanel({
           }}>
             🎒 Resources
           </div>
-          
+
           <div style={{ display: 'flex', gap: '12px', justifyContent: 'center' }}>
             {/* Wood */}
             <div style={{
@@ -213,7 +213,7 @@ export function BotMetricsPanel({
                 Wood
               </div>
             </div>
-            
+
             {/* Stone */}
             <div style={{
               flex: 1,
@@ -251,14 +251,14 @@ export function BotMetricsPanel({
           }}>
             💧 Physical Needs
           </div>
-          
+
           {/* Water meter (always shown) */}
           <NeedsMeter
             label="Water"
             value={selectedBotInfo.needs.water}
             uiTheme={uiTheme}
           />
-          
+
           {/* Other needs - only show if not 100% */}
           {Object.entries(selectedBotInfo.needs)
             .filter(([key]) => key !== 'water')
@@ -277,8 +277,8 @@ export function BotMetricsPanel({
       )}
 
       {/* Bot ID */}
-      <div style={{ 
-        fontSize: '10px', 
+      <div style={{
+        fontSize: '10px',
         color: uiTheme.textMuted,
         fontFamily: 'monospace',
         opacity: 0.5,

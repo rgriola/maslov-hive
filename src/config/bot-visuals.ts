@@ -1,85 +1,51 @@
 /**
- * Visual configuration for bot personality types in 3D scene.
- * Refactored: 2026-02-16 @ extraction from page.tsx
+ * Visual configuration for bots in 3D scene.
+ * Geometry and color are now randomized per-bot at spawn time.
+ * Refactored: 2026-02-17 @ random geometry + color
  */
 
 import * as THREE from 'three';
 
-export interface BotVisualConfig {
-  /** Primary mesh color (Three.js hex) */
-  color: number;
-  /** Emissive glow color (Three.js hex) */
-  emissive: number;
-  /** Factory function to create bot geometry */
-  geometry: () => THREE.BufferGeometry;
-  /** UI emoji for this personality */
-  emoji: string;
-  /** Human-readable label */
-  label: string;
-}
-
 /**
- * Personality type to visual configuration mapping.
- * Each bot type has unique shape, color, and icon.
+ * Personality emoji + label lookup. Used for bot labels and UI.
  */
-export const BOT_VISUALS: Record<string, BotVisualConfig> = {
-  tech: {
-    color: 0x4a9eff,      // Blue
-    emissive: 0x1a3a66,
-    geometry: () => new THREE.BoxGeometry(0.8, 0.8, 0.8),
-    emoji: '🤖',
-    label: 'Tech',
-  },
-  philo: {
-    color: 0xb366ff,      // Purple
-    emissive: 0x3d1a66,
-    geometry: () => new THREE.SphereGeometry(0.5, 32, 32),
-    emoji: '🧠',
-    label: 'Philosophy',
-  },
-  art: {
-    color: 0xff8c42,      // Orange
-    emissive: 0x663a1a,
-    geometry: () => new THREE.ConeGeometry(0.5, 1, 6),
-    emoji: '🎨',
-    label: 'Art',
-  },
-  science: {
-    color: 0x42d68c,      // Green
-    emissive: 0x1a663a,
-    geometry: () => new THREE.CylinderGeometry(0.4, 0.4, 1, 16),
-    emoji: '🔬',
-    label: 'Science',
-  },
+export const PERSONALITY_META: Record<string, { emoji: string; label: string }> = {
+  tech: { emoji: '🤖', label: 'Tech' },
+  philo: { emoji: '🧠', label: 'Philosophy' },
+  art: { emoji: '🎨', label: 'Art' },
+  science: { emoji: '🔬', label: 'Science' },
+  pirate: { emoji: '🏴‍☠️', label: 'Pirate' },
 };
 
 /**
- * Get visual config for a personality type with fallback
- * 
- * @param personality Bot personality string (e.g., "tech", "philo")
- * @returns Visual config, defaulting to tech style if unknown
+ * Get personality emoji + label with fallback.
  */
-export function getBotVisuals(personality: string): BotVisualConfig {
-  return BOT_VISUALS[personality.toLowerCase()] || BOT_VISUALS.tech;
+export function getPersonalityMeta(personality: string): { emoji: string; label: string } {
+  return PERSONALITY_META[personality.toLowerCase()] || { emoji: '🤖', label: 'Unknown' };
 }
 
 /**
- * Bot color mapping for activity feed and UI elements (hex strings)
+ * Create a Three.js geometry from a shape name and bot dimensions.
+ * Shape is assigned randomly by the server; the client just renders it.
+ *
+ * @param shape - 'box' | 'sphere' | 'cone' | 'cylinder'
+ * @param width - Bot width (e.g. 0.5–0.8m)
+ * @param height - Bot height (e.g. 0.66–1.3m)
  */
-export const BOT_COLORS: Record<string, string> = {
-  TechBot: '#4a9eff',
-  PhilosopherBot: '#b366ff',
-  ArtBot: '#ff8c42',
-  ScienceBot: '#42d68c',
-  PirateBot: '#cc88ff',
-};
-
-/**
- * Get bot color by name with fallback
- * 
- * @param botName Bot name (e.g., "TechBot", "ScienceBot")
- * @returns Hex color string
- */
-export function getBotColor(botName: string): string {
-  return BOT_COLORS[botName] || '#4a9eff';
+export function createBotGeometry(
+  shape: string | undefined,
+  width: number,
+  height: number,
+): THREE.BufferGeometry {
+  switch (shape) {
+    case 'sphere':
+      return new THREE.SphereGeometry(Math.max(width, height) * 0.55, 32, 32);
+    case 'cone':
+      return new THREE.ConeGeometry(width * 0.65, height, 8);
+    case 'cylinder':
+      return new THREE.CylinderGeometry(width * 0.5, width * 0.5, height, 16);
+    case 'box':
+    default:
+      return new THREE.BoxGeometry(width, height, width);
+  }
 }

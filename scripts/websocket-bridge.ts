@@ -19,6 +19,7 @@ import {
   random256Color,
   randomBotWidth,
   randomBotHeight,
+  randomBotShape,
   detectPersonality,
   isWalkable
 } from '@/lib/world-physics';
@@ -103,6 +104,7 @@ async function initializeBots() {
           width: randomBotWidth(),
           height: randomBotHeight(),
           color: random256Color(),
+          shape: randomBotShape(),
           inventory: { wood: 0, stone: 0 },
           needsPostTracker: {
             water: { seeking: false, critical: false, zero: false },
@@ -141,6 +143,7 @@ async function initializeBots() {
           width: randomBotWidth(),
           height: randomBotHeight(),
           color: random256Color(),
+          shape: randomBotShape(),
           inventory: { wood: 0, stone: 0 },
           needsPostTracker: {
             water: { seeking: false, critical: false, zero: false },
@@ -251,6 +254,7 @@ async function initializeBots() {
         width: randomBotWidth(),
         height: randomBotHeight(),
         color: random256Color(),
+        shape: randomBotShape(),
         inventory: { wood: 0, stone: 0 },
         needsPostTracker: {
           water: { seeking: false, critical: false, zero: false },
@@ -1184,6 +1188,7 @@ function broadcastBotPositions() {
     width: b.width,
     height: b.height,
     color: b.color,
+    shape: b.shape,
     needs: b.needs,
     inventory: b.inventory,
   }));
@@ -1207,6 +1212,7 @@ function sendWorldInit(ws: WebSocket) {
     width: b.width,
     height: b.height,
     color: b.color,
+    shape: b.shape,
     needs: b.needs,
     inventory: b.inventory,
   }));

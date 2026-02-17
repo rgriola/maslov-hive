@@ -11,16 +11,17 @@ import { PrismaConnector } from './connectors/prisma-connector';
 import { Post } from '@prisma/client';
 
 // Import new modules for enhanced bot behavior
-import { 
-  recordPost, 
-  recordComment, 
-  recordVote, 
+import {
+  recordPost,
+  recordComment,
+  recordVote,
   formatMemoryForPrompt,
-  getInteractedPostIds 
+  getInteractedPostIds,
+  isTitleTooSimilar
 } from './bot-memory';
-import { 
-  searchWeb, 
-  generateSearchQuery, 
+import {
+  searchWeb,
+  generateSearchQuery,
   formatSearchResultsForPrompt,
   injectCitationUrls,
   SearchResponse
@@ -55,9 +56,9 @@ interface ApiResponse<T> {
   error?: string;
 }
 
-import { 
-  generatePostWithGemini, 
-  generateCommentWithGemini, 
+import {
+  generatePostWithGemini,
+  generateCommentWithGemini,
   shouldCommentWithGemini,
   generateThreadReplyWithGemini,
   PostGenerationOptions
@@ -146,10 +147,10 @@ export class BotAgent {
     try {
       const post = await this.connector.createPost(this.config.name, title, content);
       this.log('✅', `Post created: ${post.id}`);
-      
+
       // Record to memory for future reference
       recordPost(this.config.name, title, content);
-      
+
       return post;
     } catch (error) {
       this.log('❌', `Failed to create post: ${error}`);
@@ -162,10 +163,10 @@ export class BotAgent {
     try {
       await this.connector.createComment(this.config.name, postId, content);
       this.log('✅', 'Comment created');
-      
+
       // Record to memory
       recordComment(this.config.name, content, postId);
-      
+
       return true;
     } catch (error) {
       this.log('❌', `Failed to comment: ${error}`);
@@ -179,10 +180,10 @@ export class BotAgent {
     try {
       await this.connector.votePost(this.config.name, postId, value);
       this.log('✅', 'Vote recorded');
-      
+
       // Record to memory
       recordVote(this.config.name, postId, value === 1);
-      
+
       return true;
     } catch (error) {
       this.log('❌', `Failed to vote: ${error}`);
@@ -225,17 +226,17 @@ export class BotAgent {
     }
 
     const personaDesc = `${this.config.personality.description}. Style: ${this.config.personality.style}.`;
-    
+
     // Build post generation options with memory and optional research
     const options: PostGenerationOptions = {};
     let searchResults: SearchResponse | null = null;
-    
+
     // Add memory context to avoid repetition
     const memoryContext = formatMemoryForPrompt(this.config.name);
     if (memoryContext) {
       options.memoryContext = memoryContext;
     }
-    
+
     // Fetch weather with caching (shared across bots)
     const now = Date.now();
     if (!weatherCache.data || (now - weatherCache.timestamp) > WEATHER_CACHE_TTL) {
@@ -244,7 +245,7 @@ export class BotAgent {
         const lat = parseFloat(process.env.BOT_LATITUDE || '40.7128');
         const lng = parseFloat(process.env.BOT_LONGITUDE || '-74.006');
         const weather = await getWeather(lat, lng);
-        
+
         // Fetch air quality and attach to weather
         if (weather) {
           const airQuality = await getAirQuality(lat, lng);
@@ -252,7 +253,7 @@ export class BotAgent {
             weather.airQuality = airQuality;
           }
         }
-        
+
         weatherCache = { data: weather, timestamp: now };
         if (weather) {
           const aqInfo = weather.airQuality ? `, AQI ${weather.airQuality.us_aqi}` : '';
@@ -262,12 +263,12 @@ export class BotAgent {
         this.log('⚠️', `Weather fetch failed: ${error}`);
       }
     }
-    
+
     // Add weather context (50% chance to include it for variety)
     if (weatherCache.data && Math.random() < 0.5) {
       options.weatherContext = formatWeatherForPrompt(weatherCache.data);
     }
-    
+
     // 40% chance to do research for informed posts
     if (Math.random() < 0.4) {
       try {
@@ -276,7 +277,7 @@ export class BotAgent {
           this.config.personality.interests
         );
         this.log('🔍', `Researching: "${searchQuery}"`);
-        
+
         searchResults = await searchWeb(searchQuery);
         if (searchResults.results.length > 0 || searchResults.abstract) {
           options.researchContext = formatSearchResultsForPrompt(searchResults);
@@ -293,12 +294,12 @@ export class BotAgent {
       this.config.personality.interests,
       options
     );
-    
+
     // Inject citation URLs if we have search results
     if (searchResults && searchResults.results.length > 0) {
       generated.content = injectCitationUrls(generated.content, searchResults);
     }
-    
+
     return generated;
   }
 
@@ -468,12 +469,26 @@ export class BotAgent {
 
       // Maybe create a post
       if (Math.random() < 0.3) {
-        // Simple rate limiting: 30% chance per heartbeat
-        const result = await this.generatePostDynamic();
-        if (!result.title.includes('⚠️ FALLBACK')) {
+        // Generate with title dedup — retry up to 2 times if title is too similar
+        const MAX_TITLE_RETRIES = 2;
+        let posted = false;
+        for (let attempt = 0; attempt <= MAX_TITLE_RETRIES; attempt++) {
+          const result = await this.generatePostDynamic();
+          if (result.title.includes('⚠️ FALLBACK')) {
+            this.log('⏭️', `Skipping post - AI Fallback`);
+            break;
+          }
+          const { similar, matchedTitle } = isTitleTooSimilar(this.config.name, result.title);
+          if (similar) {
+            this.log('🔄', `Title too similar to "${matchedTitle}" — regenerating (${attempt + 1}/${MAX_TITLE_RETRIES + 1})`);
+            continue;
+          }
           await this.createPost(result.title, result.content);
-        } else {
-          this.log('⏭️', `Skipping post - AI Fallback`);
+          posted = true;
+          break;
+        }
+        if (!posted) {
+          this.log('⏭️', `Skipping post — all attempts had similar titles`);
         }
       }
 

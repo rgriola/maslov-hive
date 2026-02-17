@@ -23,7 +23,7 @@ import { rgbToHex } from '@/utils/color';
 import { calculateSunPosition } from '@/utils/solar';
 
 // Config
-import { BOT_VISUALS } from '@/config/bot-visuals';
+import { getPersonalityMeta, createBotGeometry } from '@/config/bot-visuals';
 
 // Hooks
 import { useWeather } from '@/hooks/useWeather';
@@ -302,26 +302,25 @@ export default function SimulationPage() {
 
   // ─── Load recent posts on mount ────────────────────────────────
   useEffect(() => {
-    const botColorMap: Record<string, string> = {
-      TechBot: '#4a9eff',
-      PhilosopherBot: '#b366ff',
-      ArtBot: '#ff8c42',
-      ScienceBot: '#42d68c',
-      PirateBot: '#cc88ff',
-    };
     fetch('/api/v1/posts?limit=25')
       .then(res => res.json())
       .then(data => {
         const posts = data.data?.posts || data.posts || [];
-        const messages: ActivityMessage[] = posts.map((p: { id: string; agent: { name: string }; title: string; content: string; createdAt: string }) => ({
-          id: p.id,
-          postId: p.id,
-          botName: p.agent.name,
-          botColor: botColorMap[p.agent.name] || '#888',
-          text: p.title || p.content.substring(0, 80),
-          content: p.content,
-          time: new Date(p.createdAt).toLocaleTimeString(),
-        }));
+        const messages: ActivityMessage[] = posts.map((p: { id: string; agent: { name: string }; title: string; content: string; createdAt: string }) => {
+          // Try to get the bot's actual mesh color from the simulation
+          const botEntity = botsRef.current.get(
+            [...botsRef.current.entries()].find(([, e]) => e.data.botName === p.agent.name)?.[0] || ''
+          );
+          return {
+            id: p.id,
+            postId: p.id,
+            botName: p.agent.name,
+            botColor: botEntity?.data.color || '#888',
+            text: p.title || p.content.substring(0, 80),
+            content: p.content,
+            time: new Date(p.createdAt).toLocaleTimeString(),
+          };
+        });
         setActivityFeed(messages);
       })
       .catch(err => console.error('Failed to load posts:', err));
@@ -451,22 +450,22 @@ export default function SimulationPage() {
       return;
     }
 
-    const visual = BOT_VISUALS[data.personality] || BOT_VISUALS.tech;
+    const meta = getPersonalityMeta(data.personality);
 
     // Use server-provided random dimensions, fallback to defaults
     const w = data.width || 0.65;
     const h = data.height || 1.0;
     const botColor = data.color
       ? new THREE.Color(data.color)
-      : new THREE.Color(visual.color);
+      : new THREE.Color(0x4a9eff);
     const emissiveColor = botColor.clone().multiplyScalar(0.3);
 
     // Create group
     const group = new THREE.Group();
     group.position.set(data.x, h / 2, data.z);
 
-    // Main mesh — box with random width & height
-    const geometry = new THREE.BoxGeometry(w, h, w);
+    // Main mesh — use server-assigned random geometry type
+    const geometry = createBotGeometry(data.shape, w, h);
     const material = new THREE.MeshStandardMaterial({
       color: botColor,
       emissive: emissiveColor,
@@ -497,7 +496,7 @@ export default function SimulationPage() {
     // HTML label
     const label = document.createElement('div');
     label.className = 'bot-label';
-    label.innerHTML = `${visual.emoji} ${data.botName}`;
+    label.innerHTML = `${meta.emoji} ${data.botName}`;
     labelsContainer.appendChild(label);
 
     // Speech bubble
@@ -858,13 +857,13 @@ export default function SimulationPage() {
 
           // Set selected bot info for metrics panel
           if (entity) {
-            const visual = BOT_VISUALS[entity.data.personality] || BOT_VISUALS.tech;
+            const meta = getPersonalityMeta(entity.data.personality);
             setSelectedBotInfo({
               botId: entity.data.botId,
               botName: entity.data.botName,
               personality: entity.data.personality,
               postCount: entity.postCount,
-              color: entity.data.color || `#${visual.color.toString(16).padStart(6, '0')}`,
+              color: entity.data.color || '#888',
               state: entity.data.state,
               height: entity.data.height,
               lastPostTime: entity.recentPost?.time,
@@ -1088,8 +1087,8 @@ export default function SimulationPage() {
               if (bot) {
                 bot.postCount += 1;
                 bot.recentPost = activityMsg;
-                const visual = BOT_VISUALS[bot.data.personality] || BOT_VISUALS.tech;
-                bot.label.innerHTML = `${visual.emoji} ${bot.data.botName} <span style="opacity:0.7;font-size:0.8em">💡${bot.postCount}</span>`;
+                const meta = getPersonalityMeta(bot.data.personality);
+                bot.label.innerHTML = `${meta.emoji} ${bot.data.botName} <span style="opacity:0.7;font-size:0.8em">💡${bot.postCount}</span>`;
               }
 
               activityRef.current(prev => {
@@ -1249,18 +1248,12 @@ export default function SimulationPage() {
         <div style={{ color: '#8888cc', fontSize: '11px', letterSpacing: '1px', textTransform: 'uppercase' as const }}>
           Bot Types
         </div>
-        {Object.entries(BOT_VISUALS).map(([key, v]) => (
+        {Object.entries(
+          { tech: getPersonalityMeta('tech'), philo: getPersonalityMeta('philo'), art: getPersonalityMeta('art'), science: getPersonalityMeta('science'), pirate: getPersonalityMeta('pirate') }
+        ).map(([key, meta]) => (
           <div key={key} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <div
-              style={{
-                width: '10px',
-                height: '10px',
-                borderRadius: key === 'philo' ? '50%' : '2px',
-                background: `#${v.color.toString(16).padStart(6, '0')}`,
-              }}
-            />
             <span style={{ color: '#ccc', fontSize: '12px' }}>
-              {v.emoji} {v.label}
+              {meta.emoji} {meta.label}
             </span>
           </div>
         ))}

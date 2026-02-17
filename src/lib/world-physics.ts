@@ -49,6 +49,15 @@ export function random256Color(): string {
     return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
 }
 
+/** Available bot geometry types */
+export const BOT_SHAPES = ['box', 'sphere', 'cone', 'cylinder'] as const;
+export type BotShape = typeof BOT_SHAPES[number];
+
+/** Pick a random geometry shape for a bot */
+export function randomBotShape(): BotShape {
+    return BOT_SHAPES[Math.floor(Math.random() * BOT_SHAPES.length)];
+}
+
 export function randomBotWidth(): number {
     return BOT_PHYSICS.MIN_WIDTH + Math.random() * (BOT_PHYSICS.MAX_WIDTH - BOT_PHYSICS.MIN_WIDTH);
 }

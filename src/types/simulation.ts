@@ -62,6 +62,7 @@ export interface BotData {
   width?: number;   // 0.5–0.8m (from WebSocket bridge)
   height?: number;  // 0.66–1.3m (from WebSocket bridge)
   color?: string;   // hex color (from WebSocket bridge)
+  shape?: string;   // geometry type: 'box' | 'sphere' | 'cone' | 'cylinder'
   needs?: BotNeeds;
   inventory?: {
     wood: number;
@@ -94,6 +95,7 @@ export interface BotState {
   width: number;
   height: number;
   color: string;
+  shape: string;    // geometry type: 'box' | 'sphere' | 'cone' | 'cylinder'
   state: string; // 'idle' | 'walking' | 'thinking' | 'sleeping'
   lastPostTitle?: string;
   lastPostTime?: number;

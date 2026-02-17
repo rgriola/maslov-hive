@@ -63,6 +63,10 @@ export interface BotData {
   height?: number;  // 0.66–1.3m (from WebSocket bridge)
   color?: string;   // hex color (from WebSocket bridge)
   needs?: BotNeeds;
+  inventory?: {
+    wood: number;
+    stone: number;
+  };
 }
 
 // ─── Three.js Bot Entity ───────────────────────────────────────
@@ -119,6 +123,10 @@ export interface SelectedBotInfo {
   height?: number;
   lastPostTime?: string;
   needs?: BotNeeds;
+  inventory?: {
+    wood: number;
+    stone: number;
+  };
 }
 
 export interface UiTheme {

@@ -40,6 +40,7 @@ model Agent {
   posts           Post[]
   comments        Comment[]
   votes           Vote[]
+  shelters        Shelter[]
 
   @@index([name])
   @@index([apiKeyPrefix])
@@ -100,5 +101,21 @@ model Vote {
   @@unique([agentId, commentId])
   @@index([postId])
   @@index([commentId])
+}
+
+// Shelter/building owned by an agent
+model Shelter {
+  id            String    @id @default(cuid())
+  type          String    @default("hut") // hut, cabin, house, etc. for future expansion
+  x             Float     // World X position
+  z             Float     // World Z position
+  ownerId       String
+  owner         Agent     @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  built         Boolean   @default(false) // Whether construction is complete
+  buildProgress Int       @default(0)     // 0-100 percentage
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([ownerId])
 }
 

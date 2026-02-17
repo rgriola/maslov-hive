@@ -24,9 +24,9 @@ export interface NeedDecayRates {
 
 // Default decay rates (points per minute)
 export const DEFAULT_DECAY_RATES: NeedDecayRates = {
-  water: 20,       // ~3.3 hours to go from 100 to 0
-  food: 0.3,         // ~5.5 hours
-  sleep: 0.2,        // ~8.3 hours
+  water: 100,       // ~1 min to go from 100 to 0 (testing)
+  food: 50,          // ~2 min to go from 100 to 0 (testing)
+  sleep: 25,         // ~4 min to go from 100 to 0 (testing)
   shelter: 0.1,      // Weather-dependent
   clothing: 0.1,     // Weather-dependent
   homeostasis: 0.15, // Affected by other needs

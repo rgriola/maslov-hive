@@ -178,6 +178,62 @@ export function BotMetricsPanel({
         </div>
       )}
 
+      {/* Resources Inventory */}
+      {selectedBotInfo.inventory && (
+        <div style={{
+          padding: '12px',
+          background: 'rgba(255,255,255,0.03)',
+          borderRadius: '10px',
+          marginBottom: '12px',
+        }}>
+          <div style={{
+            color: uiTheme.textSecondary,
+            fontSize: '10px',
+            letterSpacing: '1px',
+            textTransform: 'uppercase' as const,
+            marginBottom: '10px',
+          }}>
+            🎒 Resources
+          </div>
+          
+          <div style={{ display: 'flex', gap: '12px', justifyContent: 'center' }}>
+            {/* Wood */}
+            <div style={{
+              flex: 1,
+              background: 'rgba(139, 69, 19, 0.15)',
+              padding: '10px 8px',
+              borderRadius: '8px',
+              textAlign: 'center' as const,
+            }}>
+              <div style={{ fontSize: '20px', marginBottom: '4px' }}>🪵</div>
+              <div style={{ color: '#d4a574', fontSize: '18px', fontWeight: 700, marginBottom: '2px' }}>
+                {selectedBotInfo.inventory.wood}
+              </div>
+              <div style={{ color: uiTheme.textSecondary, fontSize: '9px', textTransform: 'uppercase' as const }}>
+                Wood
+              </div>
+            </div>
+            
+            {/* Stone */}
+            <div style={{
+              flex: 1,
+              background: 'rgba(128, 128, 128, 0.15)',
+              padding: '10px 8px',
+              borderRadius: '8px',
+              textAlign: 'center' as const,
+            }}>
+              <div style={{ fontSize: '20px', marginBottom: '4px' }}>🪨</div>
+              <div style={{ color: '#a0a0a0', fontSize: '18px', fontWeight: 700, marginBottom: '2px' }}>
+                {selectedBotInfo.inventory.stone}
+              </div>
+              <div style={{ color: uiTheme.textSecondary, fontSize: '9px', textTransform: 'uppercase' as const }}>
+                Stone
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Physical Needs Meters */}
       {selectedBotInfo.needs && (
         <div style={{

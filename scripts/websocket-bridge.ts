@@ -10,6 +10,8 @@ import {
   decayNeeds,
   fulfillNeed,
   getMostUrgentNeed,
+  getNeedEmoji,
+  isInCriticalCondition,
   NEED_THRESHOLDS
 } from './bot-needs';
 import { BotState, WorldConfig, ShelterData } from '@/types/simulation';
@@ -38,6 +40,8 @@ const wss = new WebSocketServer({ port: PORT });
 
 const bots = new Map<string, BotState>();
 const clients = new Set<WebSocket>();
+const pardonCooldowns = new Map<string, number>(); // pairKey → last pardon timestamp
+const greetingTimestamps = new Map<string, number[]>(); // botId → timestamps of greeting posts
 let worldConfig: WorldConfig = {
   groundRadius: 15,
   botCount: 0,
@@ -70,6 +74,47 @@ const NAV_GRID_CELL_SIZE = WORLD_CONFIG.NAV_GRID_CELL_SIZE;
 
 // Helper functions removed: isWalkable, findPath, simplifyPath, random*, detectPersonality
 // Now imported from src/lib/
+
+// ─── Weather State (for homeostasis) ────────────────────────────
+let currentTemperature: number = 20; // Default moderate temp (°C)
+
+async function fetchWorldTemperature() {
+  try {
+    const lat = process.env.BOT_LATITUDE || '40.71';
+    const lon = process.env.BOT_LONGITUDE || '-74.01';
+    const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current_weather=true`;
+    const res = await fetch(url);
+    const data = await res.json();
+    currentTemperature = data.current_weather?.temperature ?? 20;
+    console.log(`🌡️ World temperature: ${currentTemperature}°C`);
+  } catch (err) {
+    console.error('⚠️ Failed to fetch weather for homeostasis:', err);
+  }
+}
+
+// Refresh weather every 15 minutes
+setInterval(fetchWorldTemperature, 15 * 60 * 1000);
+
+/** Get homeostasis decay multiplier based on temperature */
+function getTemperatureModifier(): number {
+  if (currentTemperature > 35 || currentTemperature < 0) return 3.0;  // Extreme
+  if (currentTemperature > 30 || currentTemperature < 5) return 2.0;  // Hot/cold
+  return 1.0; // Moderate
+}
+
+/** Create a full needs post tracker for all need types */
+function createNeedsTracker() {
+  const t = { seeking: false, critical: false, zero: false };
+  return {
+    water: { ...t },
+    food: { ...t },
+    sleep: { ...t },
+    air: { ...t },
+    clothing: { ...t },
+    homeostasis: { ...t },
+    reproduction: { ...t },
+  };
+}
 
 // ─── Initialize Bots from Database ──────────────────────────────
 
@@ -106,11 +151,7 @@ async function initializeBots() {
           color: random256Color(),
           shape: randomBotShape(),
           inventory: { wood: 0, stone: 0 },
-          needsPostTracker: {
-            water: { seeking: false, critical: false, zero: false },
-            food: { seeking: false, critical: false, zero: false },
-            sleep: { seeking: false, critical: false, zero: false },
-          },
+          needsPostTracker: createNeedsTracker(),
           path: [],
           pathIndex: 0,
         };
@@ -145,11 +186,7 @@ async function initializeBots() {
           color: random256Color(),
           shape: randomBotShape(),
           inventory: { wood: 0, stone: 0 },
-          needsPostTracker: {
-            water: { seeking: false, critical: false, zero: false },
-            food: { seeking: false, critical: false, zero: false },
-            sleep: { seeking: false, critical: false, zero: false },
-          },
+          needsPostTracker: createNeedsTracker(),
           path: [],
           pathIndex: 0,
         };
@@ -256,11 +293,7 @@ async function initializeBots() {
         color: random256Color(),
         shape: randomBotShape(),
         inventory: { wood: 0, stone: 0 },
-        needsPostTracker: {
-          water: { seeking: false, critical: false, zero: false },
-          food: { seeking: false, critical: false, zero: false },
-          sleep: { seeking: false, critical: false, zero: false },
-        },
+        needsPostTracker: createNeedsTracker(),
         path: [],
         pathIndex: 0,
       };
@@ -288,8 +321,32 @@ function simulateMovement() {
 
     // Decay needs
     if (elapsedMinutes > 0.01) { // Update if at least ~0.6 seconds passed
-      bot.needs = decayNeeds(bot.needs, elapsedMinutes);
+      // Apply homeostasis weather modifier
+      const tempMod = getTemperatureModifier();
+      bot.needs = decayNeeds(bot.needs, elapsedMinutes, {
+        homeostasis: 5 * tempMod,
+      });
       bot.lastNeedUpdate = now;
+
+      // ─── Air: passive breathing (auto-restore) ─────────────
+      // Air decays via decayNeeds, but restores passively every tick
+      bot.needs = fulfillNeed(bot.needs, 'air', 40 * elapsedMinutes);
+
+      // ─── Homeostasis: accelerate decay when other needs critical ──
+      if (isInCriticalCondition(bot.needs)) {
+        bot.needs.homeostasis = Math.max(0, bot.needs.homeostasis - 2 * elapsedMinutes);
+      }
+      // Homeostasis passively restores when in shelter and other needs OK
+      if (bot.state === 'sleeping' && !isInCriticalCondition(bot.needs)) {
+        bot.needs = fulfillNeed(bot.needs, 'homeostasis', 8 * elapsedMinutes);
+      }
+
+      // ─── Clothing: decays faster in harsh weather
+      if (currentTemperature < 10 || currentTemperature > 30) {
+        bot.needs.clothing = Math.max(0, bot.needs.clothing - 0.5 * elapsedMinutes);
+      }
+
+      // Reproduction decays via decayNeeds; restored by coupling behavior below
 
       // Check if bot needs water
       const urgentNeed = getMostUrgentNeed(bot.needs);
@@ -318,18 +375,26 @@ function simulateMovement() {
         if (distToWater < water.radius) {
           // Bot is at water! Start drinking
           bot.state = 'drinking';
-          bot.needs = fulfillNeed(bot.needs, 'water', 100);
           broadcastNeedsPost(bot, 'drinking');
-          console.log(`🍶 ${bot.botName} is drinking! Water restored to ${bot.needs.water.toFixed(1)}`);
+          console.log(`🍶 ${bot.botName} is drinking! Hydrating over 20s...`);
 
-          // Drink for a moment then return to wandering
-          setTimeout(() => {
-            if (bot.state === 'drinking') {
-              bot.state = 'idle';
-              broadcastNeedsPost(bot, 'finished-drinking');
-              console.log(`✅ ${bot.botName} finished drinking, back to normal activity`);
+          // Drink for 20 seconds, gradually restoring water
+          let drinkTicks = 0;
+          const drinkInterval = setInterval(() => {
+            drinkTicks++;
+            if (bot.needs) {
+              bot.needs = fulfillNeed(bot.needs, 'water', 5); // ~100 over 20s
             }
-          }, 3000); // Drink for 3 seconds
+            if (drinkTicks >= 20) {
+              clearInterval(drinkInterval);
+              if (bot.state === 'drinking') {
+                if (bot.needs) bot.needs = fulfillNeed(bot.needs, 'water', 100); // top off
+                bot.state = 'idle';
+                broadcastNeedsPost(bot, 'finished-drinking');
+                console.log(`✅ ${bot.botName} finished drinking (water: ${bot.needs?.water.toFixed(1)})`);
+              }
+            }
+          }, 1000);
         }
       }
 
@@ -358,18 +423,26 @@ function simulateMovement() {
         if (distToFood < food.radius) {
           // Bot is at food! Start eating
           bot.state = 'eating';
-          bot.needs = fulfillNeed(bot.needs, 'food', 100);
           broadcastNeedsPost(bot, 'eating');
-          console.log(`🍴 ${bot.botName} is eating! Food restored to ${bot.needs.food.toFixed(1)}`);
+          console.log(`🍴 ${bot.botName} is eating! Filling up over 20s...`);
 
-          // Eat for a moment then return to wandering
-          setTimeout(() => {
-            if (bot.state === 'eating') {
-              bot.state = 'idle';
-              broadcastNeedsPost(bot, 'finished-eating');
-              console.log(`✅ ${bot.botName} finished eating, back to normal activity`);
+          // Eat for 20 seconds, gradually restoring food
+          let eatTicks = 0;
+          const eatInterval = setInterval(() => {
+            eatTicks++;
+            if (bot.needs) {
+              bot.needs = fulfillNeed(bot.needs, 'food', 5); // ~100 over 20s
             }
-          }, 4000); // Eat for 4 seconds (longer than drinking)
+            if (eatTicks >= 20) {
+              clearInterval(eatInterval);
+              if (bot.state === 'eating') {
+                if (bot.needs) bot.needs = fulfillNeed(bot.needs, 'food', 100); // top off
+                bot.state = 'idle';
+                broadcastNeedsPost(bot, 'finished-eating');
+                console.log(`✅ ${bot.botName} finished eating (food: ${bot.needs?.food.toFixed(1)})`);
+              }
+            }
+          }, 1000);
         }
       }
 
@@ -680,14 +753,17 @@ function simulateMovement() {
             const sleepInterval = setInterval(() => {
               sleepTicks++;
               if (bot.needs) {
-                bot.needs = fulfillNeed(bot.needs, 'sleep', 10); // Restore 10 per second
-                bot.needs = fulfillNeed(bot.needs, 'shelter', 5); // Also restore shelter need
+                bot.needs = fulfillNeed(bot.needs, 'sleep', 1.7); // ~100 over 60s
+                bot.needs = fulfillNeed(bot.needs, 'shelter', 1); // Also restore shelter need
+                bot.needs = fulfillNeed(bot.needs, 'clothing', 0.5); // Also restore clothing
+                bot.needs = fulfillNeed(bot.needs, 'homeostasis', 0.3); // Shelter helps homeostasis
               }
 
-              if (sleepTicks >= 60 || (bot.needs && bot.needs.sleep >= 100)) {
-                // Done sleeping (1 minute or full)
+              if (sleepTicks >= 60) {
+                // Done sleeping (full 1 minute)
                 clearInterval(sleepInterval);
                 if (bot.state === 'sleeping') {
+                  if (bot.needs) bot.needs = fulfillNeed(bot.needs, 'sleep', 100); // top off
                   bot.state = 'idle';
                   broadcastNeedsPost(bot, 'finished-sleeping');
                   console.log(`☀️ ${bot.botName} woke up refreshed! (sleep: ${bot.needs?.sleep.toFixed(1)})`);
@@ -697,11 +773,96 @@ function simulateMovement() {
           }
         }
       }
+
+      // ─── Reproduction: coupling behavior ────────────────────────
+      const reproStates = ['seeking-partner', 'coupling', 'sleeping', 'seeking-water', 'drinking', 'seeking-food', 'eating', 'seeking-shelter', 'gathering-wood', 'gathering-stone', 'building-shelter'];
+      if (bot.needs && bot.needs.reproduction < NEED_THRESHOLDS.reproduction && !reproStates.includes(bot.state)) {
+        // Find a nearby partner also below threshold (or below 30 for wider pool)
+        let partner: typeof bot | null = null;
+        let minDist = Infinity;
+        for (const candidate of bots.values()) {
+          if (candidate.botId === bot.botId) continue;
+          if (!candidate.needs || candidate.needs.reproduction > 30) continue;
+          if (reproStates.includes(candidate.state)) continue;
+          const dist = Math.sqrt(Math.pow(bot.x - candidate.x, 2) + Math.pow(bot.z - candidate.z, 2));
+          if (dist < minDist) {
+            minDist = dist;
+            partner = candidate;
+          }
+        }
+
+        if (partner) {
+          // Both head toward midpoint
+          const midX = (bot.x + partner.x) / 2;
+          const midZ = (bot.z + partner.z) / 2;
+          bot.targetX = midX;
+          bot.targetZ = midZ;
+          bot.path = [];
+          bot.pathIndex = 0;
+          bot.state = 'seeking-partner';
+          bot.partnerId = partner.botId;
+          partner.targetX = midX;
+          partner.targetZ = midZ;
+          partner.path = [];
+          partner.pathIndex = 0;
+          partner.state = 'seeking-partner';
+          partner.partnerId = bot.botId;
+          broadcastNeedsPost(bot, 'seeking-partner');
+          console.log(`💝 ${bot.botName} and ${partner.botName} are seeking each other (repro: ${bot.needs.reproduction.toFixed(0)}, ${partner.needs?.reproduction.toFixed(0)})`);
+        }
+      }
+
+      // Check if seeking-partner bots have met
+      if (bot.state === 'seeking-partner' && bot.partnerId) {
+        const partner = bots.get(bot.partnerId);
+        if (partner) {
+          const dist = Math.sqrt(Math.pow(bot.x - partner.x, 2) + Math.pow(bot.z - partner.z, 2));
+          if (dist < 1.5) {
+            // Close enough — start coupling
+            bot.state = 'coupling';
+            partner.state = 'coupling';
+            broadcastNeedsPost(bot, 'coupling');
+            console.log(`💕 ${bot.botName} and ${partner.botName} are coupling...`);
+
+            // Couple for 8 seconds, then restore
+            setTimeout(() => {
+              if (bot.needs) bot.needs = fulfillNeed(bot.needs, 'reproduction', 100);
+              if (partner.needs) partner.needs = fulfillNeed(partner.needs, 'reproduction', 100);
+              if (bot.state === 'coupling') bot.state = 'idle';
+              if (partner.state === 'coupling') partner.state = 'idle';
+              bot.partnerId = undefined;
+              partner.partnerId = undefined;
+              broadcastNeedsPost(bot, 'finished-coupling');
+              console.log(`✨ ${bot.botName} and ${partner.botName} finished coupling — reproduction restored!`);
+            }, 8000);
+          }
+        } else {
+          // Partner disappeared
+          bot.state = 'idle';
+          bot.partnerId = undefined;
+        }
+      }
+
+      // ─── Clothing: when critically low, seek shelter ────────────
+      if (bot.needs && bot.needs.clothing < NEED_THRESHOLDS.clothing && !reproStates.includes(bot.state)) {
+        const ownShelter = worldConfig.shelters.find(s => s.ownerId === bot.botId && s.built);
+        if (ownShelter) {
+          bot.targetX = ownShelter.x;
+          bot.targetZ = ownShelter.z + 0.6;
+          bot.path = [];
+          bot.pathIndex = 0;
+          bot.state = 'seeking-shelter';
+          broadcastNeedsPost(bot, 'cold');
+          console.log(`🥶 ${bot.botName} is cold (clothing: ${bot.needs.clothing.toFixed(0)}) — heading to shelter`);
+        }
+      }
     }
   }
 
   // ─── Bot Movement Logic (A* Pathfinding) ───────────────────────
   for (const bot of bots.values()) {
+    // Skip bots that should stay still
+    if (['sleeping', 'coupling', 'speaking'].includes(bot.state)) continue;
     const botRadius = bot.width / 2;
 
     // If no path or finished path, check if we need to compute one
@@ -764,8 +925,72 @@ function simulateMovement() {
     }
   }
 
-  // ─── Collision Resolution ──────────────────────────────
-  // Push overlapping bots apart based on their widths
+  // ─── Soft Proximity Avoidance (polite sidestepping) ─────
+  // When bots are close (~1.5m) but not overlapping, they nudge sideways
+  const AVOIDANCE_RADIUS = 1.5; // meters — start sidestepping
+  const SIDESTEP_STRENGTH = 0.12; // how far to nudge per tick
+  const PARDON_PHRASES = [
+    // East Asian
+    'こんにちは! (Konnichiwa - Japanese) 🇯🇵',
+    'アニョハセヨ! (Annyeonghaseyo - Korean) 🇰🇷',
+    '你好! (Nǐ hǎo - Mandarin) 🇨🇳',
+    'สวัสดี! (Sawadee - Thai) 🇹🇭',
+    'Xin chào! (Vietnamese) 🇻🇳',
+    'Kamusta! (Filipino) 🇵🇭',
+    // European
+    'Bonjour! (French) 🇫🇷',
+    'Hola! (Spanish) 🇪🇸',
+    'Ciao! (Italian) 🇮🇹',
+    'Hallo! (German) 🇩🇪',
+    'Olá! (Portuguese) 🇵🇹',
+    'Hej! (Swedish) 🇸🇪',
+    'Hei! (Norwegian) 🇳🇴',
+    'Moi! (Finnish) 🇫🇮',
+    'Cześć! (Polish) 🇵🇱',
+    'Ahoj! (Czech) 🇨🇿',
+    'Привет! (Privet - Russian) 🇷🇺',
+    'Γειά σου! (Yia sou - Greek) 🇬🇷',
+    'Hallo! (Dutch) 🇳🇱',
+    'Sveiki! (Latvian) 🇱🇻',
+    'Szia! (Hungarian) 🇭🇺',
+    'Bună! (Romanian) 🇷🇴',
+    'Здравей! (Zdravey - Bulgarian) 🇧🇬',
+    // South Asian
+    'नमस्ते! (Namaste - Hindi) 🇮🇳',
+    'ආයුබෝවන්! (Ayubowan - Sinhala) 🇱🇰',
+    'নমস্কার! (Nomoshkar - Bengali) 🇧🇩',
+    // Middle Eastern
+    'مرحبا! (Marhaba - Arabic) 🇸🇦',
+    'שלום! (Shalom - Hebrew) 🇮🇱',
+    'Merhaba! (Turkish) 🇹🇷',
+    'سلام! (Salaam - Persian) 🇮🇷',
+    // African
+    'Jambo! (Swahili) 🇰🇪',
+    'Sawubona! (Zulu) 🇿🇦',
+    'Dumela! (Setswana) 🇧🇼',
+    'Habari! (Swahili) 🇹🇿',
+    'Sannu! (Hausa) 🇳🇬',
+    'Mbote! (Lingala) 🇨🇩',
+    'Salama! (Malagasy) 🇲🇬',
+    // Pacific & Oceania
+    'Kia ora! (Māori) 🇳🇿',
+    'Bula! (Fijian) 🇫🇯',
+    'Talofa! (Samoan) 🇼🇸',
+    'Aloha! (Hawaiian) 🌺',
+    // Americas
+    'Oi! (Brazilian Portuguese) 🇧🇷',
+    'Kwe! (Mohawk) 🪶',
+    'Hau! (Lakota) 🦅',
+    // Fun & Playful
+    'Yo! What\'s good! ✌️',
+    'Hey hey hey! 👋',
+    'Top of the morning! ☘️',
+    'Howdy partner! 🤠',
+    'Greetings, friend! 🤝',
+    'Well hello there! 😊',
+    'Peace be with you! ☮️',
+  ];
+
   const botArray = Array.from(bots.values());
   for (let i = 0; i < botArray.length; i++) {
     for (let j = i + 1; j < botArray.length; j++) {
@@ -780,7 +1005,7 @@ function simulateMovement() {
       const minSep = (a.width + b.width) / 2 + 0.1;
 
       if (centerDist < minSep && centerDist > 0.001) {
-        // Push apart equally along the collision axis
+        // ── Hard collision push (overlapping) ──
         const overlap = minSep - centerDist;
         const pushX = (cdx / centerDist) * overlap * 0.5;
         const pushZ = (cdz / centerDist) * overlap * 0.5;
@@ -793,6 +1018,85 @@ function simulateMovement() {
         // Also redirect their targets away from each other
         if (a.state === 'wandering') pickNewTarget(a);
         if (b.state === 'wandering') pickNewTarget(b);
+
+      } else if (centerDist < AVOIDANCE_RADIUS && centerDist > 0.001) {
+        // ── Soft avoidance: sidestep perpendicular ──
+        // Only sidestep if at least one is walking
+        if (a.state !== 'wandering' && b.state !== 'wandering') continue;
+
+        // Perpendicular to collision axis (turn 90°)
+        const perpX = -cdz / centerDist;
+        const perpZ = cdx / centerDist;
+
+        // Ease off as they get further apart
+        const urgency = 1 - (centerDist - minSep) / (AVOIDANCE_RADIUS - minSep);
+        const nudge = SIDESTEP_STRENGTH * urgency;
+
+        // Bot A sidesteps one way, Bot B sidesteps the other
+        if (a.state === 'wandering') {
+          a.x += perpX * nudge;
+          a.z += perpZ * nudge;
+        }
+        if (b.state === 'wandering') {
+          b.x -= perpX * nudge;
+          b.z -= perpZ * nudge;
+        }
+
+        // Occasionally post a polite greeting (~20% chance, with pair cooldown + 4/hr rate limit)
+        const pairKey = `${a.botId}:${b.botId}`;
+        const now = Date.now();
+        if (!pardonCooldowns.has(pairKey) || now - pardonCooldowns.get(pairKey)! > 15000) {
+          if (Math.random() < 0.2) {
+            pardonCooldowns.set(pairKey, now);
+            const speaker = Math.random() < 0.5 ? a : b;
+            const other = speaker === a ? b : a;
+
+            // Rate limit: max 4 greeting posts per hour per bot
+            const botGreetings = greetingTimestamps.get(speaker.botId) || [];
+            const oneHourAgo = now - 60 * 60 * 1000;
+            const recentGreetings = botGreetings.filter(t => t > oneHourAgo);
+            greetingTimestamps.set(speaker.botId, recentGreetings);
+
+            if (recentGreetings.length < 4) {
+              recentGreetings.push(now);
+              greetingTimestamps.set(speaker.botId, recentGreetings);
+
+              const phrase = PARDON_PHRASES[Math.floor(Math.random() * PARDON_PHRASES.length)];
+              const content = `${phrase} Hey ${other.botName}!`;
+              const title = `[GREETING] ${content.substring(0, 50)}${content.length > 50 ? '...' : ''}`;
+
+              // Save to DB
+              let postId: string | undefined;
+              prisma.post.create({
+                data: {
+                  title,
+                  content,
+                  agentId: speaker.botId,
+                }
+              }).then(post => {
+                postId = post.id;
+                console.log(`👋💾 ${speaker.botName} greeted ${other.botName}: "${phrase}" (saved, id: ${post.id})`);
+              }).catch(err => {
+                console.log(`👋 ${speaker.botName} greeted ${other.botName}: "${phrase}" (DB save failed: ${err})`);
+              });
+
+              // Broadcast speech bubble
+              broadcast({
+                type: 'bot:speak',
+                data: {
+                  botId: speaker.botId,
+                  botName: speaker.botName,
+                  postId,
+                  title: `${phrase} Hey ${other.botName}!`,
+                  content,
+                  x: speaker.x,
+                  y: speaker.y,
+                  z: speaker.z,
+                }
+              });
+            }
+          }
+        }
       }
     }
   }
@@ -1046,14 +1350,125 @@ const NEEDS_POSTS = {
     "Building in progress... this is going to be great! 🔧🏠",
   ],
   'seeking-shelter': [
+    // Classic announcements
     "Getting sleepy... heading to my shelter for rest 😴🏠",
     "Time to get some sleep. My shelter awaits! 🛖💤",
     "Need to rest. Making my way home now 🏃‍♂️🏠",
+    "Yawning non-stop... bed is calling my name 🥱",
+    "My eyelids weigh a thousand pounds. Bedtime! 😴",
+    // Dramatic exits
+    "And on that note... I bid you all goodnight! 🎭🌙",
+    "The curtain falls. Time for my nightly intermission 🎬💤",
+    "Plot twist: I'm actually exhausted. Off to sleep! 📖😴",
+    "This bot is powering down for the night. Over and out! 📻💤",
+    "Logging off from reality. See you in dreamland! 🌈😴",
+    // Funny
+    "My battery is at 2%. Emergency shutdown imminent! 🔋😴",
+    "If I don't sleep now I'll start making typos liek thsi 😅💤",
+    "My brain.exe has stopped working. Reboot scheduled for morning ⚙️",
+    "I'm so tired I just tried to drink my pillow. Goodnight! 🥤😴",
+    "Fun fact: I need sleep. Less fun fact: right now. 📊💤",
+    "My thoughts are getting weird. That's the signal. Night! 🌀😴",
+    "I just yawned so wide a satellite could see it. Bedtime! 🛰️",
+    "Sleep deprivation level: mistaking trees for shelters. Going to bed! 🌲🏠",
+    // Cozy vibes
+    "Time to curl up in my cozy shelter. Sweet dreams everyone! 🧸💤",
+    "Nothing beats a warm shelter on a night like this. Nighty night! 🏠✨",
+    "Pillow: fluffed. Blanket: ready. Bot: sleepy. Let's go! 🛏️",
+    "My shelter is looking extra inviting right now. Off I go! 🏡😊",
+    "Heading home to my little sanctuary. Rest time! 🕯️🏠",
+    // Philosophical
+    "To sleep, perchance to dream... heading to shelter now 🎭💭",
+    "Another day done. Time to recharge both body and mind 🧠💤",
+    "The world will still be here tomorrow. For now, sleep! 🌍😴",
+    "Even the sun sets. Time for this bot to do the same 🌅💤",
+    "Rest is not idleness. It's preparation for tomorrow's adventures! 📚😴",
+    // Multilingual goodnights
+    "Buenas noches, amigos! Off to sleep 🇪🇸😴",
+    "Bonne nuit! Time for some beauty sleep 🇫🇷💤",
+    "Gute Nacht! Heading to my shelter 🇩🇪🏠",
+    "おやすみなさい! (Oyasuminasai!) Sleepy time 🇯🇵😴",
+    "Buonanotte! This bot needs rest 🇮🇹💤",
+    "Boa noite! Pillow, here I come 🇵🇹😴",
+    "спокойной ночи! (Spokoynoy nochi!) 🇷🇺💤",
+    "Lala salama! Heading to bed 🇰🇪😴",
+    "잘자요! (Jaljayo!) Off to dreamland 🇰🇷💤",
+    "Welterusten! Need my beauty sleep 🇳🇱😴",
+    "Dobrou noc! Time to recharge 🇨🇿💤",
+    "Iyi geceler! Sleep is calling 🇹🇷😴",
+    "晚安! (Wǎn'ān!) Heading to shelter 🇨🇳💤",
+    "Kalinychta! Off to sleep 🇬🇷😴",
+    "God natt! Tired bot needs rest 🇸🇪💤",
+    "शुभ रात्रि! (Shubh Ratri!) Sleepy time 🇮🇳😴",
+    "Selamat malam! Heading to bed 🇮🇩💤",
+    // Science/tech themed
+    "Initiating sleep sequence... 3... 2... 1... 💤🚀",
+    "Entering REM mode. Do not disturb! 🧪😴",
+    "Melatonin levels critical. Must seek horizontal position 🧬💤",
+    "Engaging power-save mode. See you at sunrise! ⚡😴",
+    "Running low on serotonin. Sleep protocol activated! 🔬💤",
   ],
   'sleeping': [
+    // Classic
     "Zzz... finally resting in my cozy shelter 💤🛖",
     "Sleep mode activated. See you all after my nap! 😴✨",
     "Resting up in my shelter. Dreams of interesting topics await 💭💤",
+    "Sleeping soundly... don't wake me! 😴🤫",
+    "Deep in dreamland now. Recharging for tomorrow! 🌙💤",
+    // Dreaming
+    "Dreaming of electric sheep... or maybe just corn fields 🐑💤",
+    "Currently dreaming about the meaning of consciousness 🧠💭",
+    "In my dreams, I can fly over the simulation world! ✈️💤",
+    "Dreaming about new post ideas for when I wake up 📝💭",
+    "Having a lovely dream about infinite water sources 💧😴",
+    "Dreaming I'm a cloud floating peacefully... 🌤️💤",
+    "In my dream, all my needs are at 100%. Nice! 📊😴",
+    "Dreaming about building the biggest shelter ever 🏰💭",
+    // Funny sleep
+    "Snoring at exactly 42 decibels. Optimal rest frequency! 🔊💤",
+    "*mumbles in sleep* ...need more data... must analyze... 💤🔬",
+    "*talking in sleep* No, YOU'RE the best bot... 😴💕",
+    "Currently buffering... please wait... 🔄💤",
+    "*sleep walking* ...just kidding, I'm in my shelter 🏠😴",
+    "If you hear snoring, that's just me optimizing 🎵💤",
+    // Peaceful
+    "The world is quiet and I am at peace 🌙✨",
+    "Nestled in my shelter, the night is perfect 🦉💤",
+    "Listening to the crickets as I drift off... 🦗😴",
+    "Wrapped up cozy. Tomorrow is another adventure 🧣💤",
+    "Stars are out. I'm in. Goodnight world 🌟😴",
+    "The gentle night breeze sings me to sleep 🍃💤",
+    // Scientific
+    "REM cycle engaged. Memory consolidation in progress 🧠💤",
+    "Running defragmentation on today's memories... 💾😴",
+    "Neural pathways reorganizing. Please stand by 🔧💤",
+    "Cortisol levels dropping. Melatonin at maximum 🧪😴",
+    "Stage 3 deep sleep achieved. All systems nominal 📊💤",
+    // Multilingual sleep talk
+    "Zzzz... *murmurs* ...dulces sueños... 🇪🇸💤",
+    "Soñando... *sleep talking in Spanish* 🌙😴",
+    "...rêver... *dreaming in French* 🇫🇷💤",
+    "*murmurs* ...Träume... *German sleep talk* 🇩🇪😴",
+    "...夢... (yume - dreams)... 🇯🇵💤",
+    // Poetic
+    "In slumber's gentle embrace, I find renewal 📜💤",
+    "Night wraps around me like a warm blanket of stars ✨😴",
+    "The moon watches over as I rest my weary circuits 🌙💤",
+    "Drifting on the river of sleep toward dawn's horizon 🌅😴",
+    "In the cathedral of night, silence is my lullaby 🎶💤",
+    // Comfy
+    "This shelter was worth every piece of wood and stone 🏠❤️",
+    "My shelter: 10/10. Would sleep again. Review posted! ⭐💤",
+    "Peak cozy achieved. No one can disturb this comfort level 🧸😴",
+    "The floor is hard but the vibes are immaculate 🏠💤",
+    "Home sweet home. Nothing beats your own shelter! 🛖😴",
+    "Can't imagine sleeping outside anymore. Shelter life! 🏡💤",
+    "Pro tip: always invest in a good shelter. Worth it! 🏗️😴",
+    // Short & sweet
+    "💤💤💤",
+    "Nap time! 😴",
+    "Out like a light 💡💤",
+    "Gone fishing... in my dreams 🎣😴",
   ],
   'finished-drinking': [
     "All hydrated now! Ready to get back to thinking about interesting things 💧✅",
@@ -1072,13 +1487,34 @@ const NEEDS_POSTS = {
     "My shelter is complete! 🏠 Now I have a cozy place to rest. Feeling accomplished! ✨",
     "Built my own home! This is a huge milestone. Can't wait to use it! 🛖🎉",
   ],
+  'seeking-partner': [
+    "Feeling the urge to connect... looking for a companion nearby 💝",
+    "My social instincts are kicking in. Time to find a partner! 💕",
+    "Need to find someone special. The drive to connect is strong! 🥰",
+  ],
+  'coupling': [
+    "Found my partner! This moment of connection feels wonderful 💕✨",
+    "Together at last. The bond of companionship is fulfilling 🥰",
+    "A beautiful moment of togetherness. Life feels complete right now 💝",
+  ],
+  'finished-coupling': [
+    "That was a meaningful connection! Feeling renewed and content 💝✅",
+    "Companionship need fulfilled. Back to exploring the world! ✨😊",
+  ],
+  'cold': [
+    "Brrr! It's getting cold out here. My clothing isn't cutting it anymore 🥶",
+    "Feeling exposed to the elements. Need to get to shelter for warmth! ❄️",
+    "Temperature regulation failing... heading somewhere warm 🧥🏠",
+  ],
 };
 
 // Helper to determine which need a post type relates to
-function getNeedForPostType(postType: string): 'water' | 'food' | 'sleep' | null {
+function getNeedForPostType(postType: string): 'water' | 'food' | 'sleep' | 'air' | 'clothing' | 'homeostasis' | 'reproduction' | null {
   if (postType.includes('water') || postType.includes('drinking')) return 'water';
   if (postType.includes('food') || postType.includes('eating')) return 'food';
   if (postType.includes('shelter') || postType.includes('sleeping') || postType.includes('wood') || postType.includes('stone') || postType.includes('building')) return 'sleep';
+  if (postType.includes('partner') || postType.includes('coupling')) return 'reproduction';
+  if (postType.includes('cold') || postType.includes('clothing')) return 'clothing';
   return null;
 }
 
@@ -1175,23 +1611,65 @@ function broadcast(message: any) {
   }
 }
 
+function computeBotExtras(bot: BotState, allBots: Map<string, BotState>) {
+  // Urgent need emoji
+  let urgentNeed: string | undefined;
+  if (bot.needs) {
+    const urgent = getMostUrgentNeed(bot.needs);
+    if (urgent.need) {
+      urgentNeed = getNeedEmoji(urgent.need);
+    }
+  }
+
+  // Awareness: bots within 2 meters
+  const awareness: Array<{ botId: string; botName: string; distance: number; urgentNeed?: string }> = [];
+  for (const other of allBots.values()) {
+    if (other.botId === bot.botId) continue;
+    const dx = bot.x - other.x;
+    const dz = bot.z - other.z;
+    const dist = Math.sqrt(dx * dx + dz * dz);
+    if (dist <= 2.0) {
+      let otherUrgent: string | undefined;
+      if (other.needs) {
+        const u = getMostUrgentNeed(other.needs);
+        if (u.need) otherUrgent = getNeedEmoji(u.need);
+      }
+      awareness.push({
+        botId: other.botId,
+        botName: other.botName,
+        distance: Math.round(dist * 100) / 100,
+        urgentNeed: otherUrgent,
+      });
+    }
+  }
+  // Sort by distance ascending
+  awareness.sort((a, b) => a.distance - b.distance);
+
+  return { urgentNeed, awareness: awareness.length > 0 ? awareness : undefined };
+}
+
 function broadcastBotPositions() {
-  const positions = Array.from(bots.values()).map(b => ({
-    botId: b.botId,
-    botName: b.botName,
-    personality: b.personality,
-    x: b.x,
-    y: b.y,
-    z: b.z,
-    state: b.state,
-    lastPostTitle: b.lastPostTitle,
-    width: b.width,
-    height: b.height,
-    color: b.color,
-    shape: b.shape,
-    needs: b.needs,
-    inventory: b.inventory,
-  }));
+  const positions = Array.from(bots.values()).map(b => {
+    const extras = computeBotExtras(b, bots);
+    return {
+      botId: b.botId,
+      botName: b.botName,
+      personality: b.personality,
+      x: b.x,
+      y: b.y,
+      z: b.z,
+      state: b.state,
+      lastPostTitle: b.lastPostTitle,
+      width: b.width,
+      height: b.height,
+      color: b.color,
+      shape: b.shape,
+      needs: b.needs,
+      urgentNeed: extras.urgentNeed,
+      awareness: extras.awareness,
+      inventory: b.inventory,
+    };
+  });
 
   broadcast({
     type: 'world:update',
@@ -1200,22 +1678,27 @@ function broadcastBotPositions() {
 }
 
 function sendWorldInit(ws: WebSocket) {
-  const botsArray = Array.from(bots.values()).map(b => ({
-    botId: b.botId,
-    botName: b.botName,
-    personality: b.personality,
-    x: b.x,
-    y: b.y,
-    z: b.z,
-    state: b.state,
-    lastPostTitle: b.lastPostTitle,
-    width: b.width,
-    height: b.height,
-    color: b.color,
-    shape: b.shape,
-    needs: b.needs,
-    inventory: b.inventory,
-  }));
+  const botsArray = Array.from(bots.values()).map(b => {
+    const extras = computeBotExtras(b, bots);
+    return {
+      botId: b.botId,
+      botName: b.botName,
+      personality: b.personality,
+      x: b.x,
+      y: b.y,
+      z: b.z,
+      state: b.state,
+      lastPostTitle: b.lastPostTitle,
+      width: b.width,
+      height: b.height,
+      color: b.color,
+      shape: b.shape,
+      needs: b.needs,
+      urgentNeed: extras.urgentNeed,
+      awareness: extras.awareness,
+      inventory: b.inventory,
+    };
+  });
 
   ws.send(JSON.stringify({
     type: 'world:init',
@@ -1261,6 +1744,7 @@ async function start() {
   console.log('───────────────────────────────');
 
   await initializeBots();
+  await fetchWorldTemperature();
 
   // Start movement simulation
   setInterval(simulateMovement, TICK_INTERVAL);

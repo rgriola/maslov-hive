@@ -505,6 +505,12 @@ export default function SimulationPage() {
     speechBubble.style.display = 'none';
     labelsContainer.appendChild(speechBubble);
 
+    // Urgent need emoji label
+    const urgentNeedLabel = document.createElement('div');
+    urgentNeedLabel.className = 'urgent-need-label';
+    urgentNeedLabel.style.display = 'none';
+    labelsContainer.appendChild(urgentNeedLabel);
+
     // Store botId on mesh for raycasting click detection
     mesh.userData = { botId: data.botId };
 
@@ -513,6 +519,7 @@ export default function SimulationPage() {
       mesh,
       label,
       speechBubble,
+      urgentNeedLabel,
       targetPos: new THREE.Vector3(data.x, h / 2, data.z),
       data,
       postCount: 0,
@@ -746,9 +753,19 @@ export default function SimulationPage() {
           entity.label.style.transform = `translate(-50%, -100%) translate(${x}px, ${y}px)`;
           entity.label.style.display = 'block';
           entity.speechBubble.style.transform = `translate(-50%, -100%) translate(${x}px, ${y - 30}px)`;
+
+          // Urgent need emoji floats above the label
+          if (entity.data.urgentNeed) {
+            entity.urgentNeedLabel.textContent = entity.data.urgentNeed;
+            entity.urgentNeedLabel.style.display = 'block';
+            entity.urgentNeedLabel.style.transform = `translate(-50%, -100%) translate(${x}px, ${y - 24}px)`;
+          } else {
+            entity.urgentNeedLabel.style.display = 'none';
+          }
         } else {
           entity.label.style.display = 'none';
           entity.speechBubble.style.display = 'none';
+          entity.urgentNeedLabel.style.display = 'none';
         }
 
         // Glow ring pulse based on state
@@ -868,6 +885,8 @@ export default function SimulationPage() {
               height: entity.data.height,
               lastPostTime: entity.recentPost?.time,
               needs: entity.data.needs,
+              urgentNeed: entity.data.urgentNeed,
+              awareness: entity.data.awareness,
               inventory: entity.data.inventory,
             });
           }
@@ -1050,6 +1069,8 @@ export default function SimulationPage() {
                           ...prev,
                           state: botData.state,
                           needs: botData.needs,
+                          urgentNeed: botData.urgentNeed,
+                          awareness: botData.awareness,
                           inventory: botData.inventory,
                         };
                       }
@@ -1152,6 +1173,7 @@ export default function SimulationPage() {
         }
         entity.label.remove();
         entity.speechBubble.remove();
+        entity.urgentNeedLabel.remove();
       }
       botsToCleanup.clear();
     };
@@ -1338,6 +1360,20 @@ export default function SimulationPage() {
         @keyframes slideInRight {
           from { opacity: 0; transform: translateX(20px); }
           to { opacity: 1; transform: translateX(0); }
+        }
+        .urgent-need-label {
+          position: absolute;
+          top: 0;
+          left: 0;
+          font-size: 22px;
+          pointer-events: none;
+          filter: drop-shadow(0 2px 4px rgba(0,0,0,0.6));
+          animation: urgentPulse 1.2s ease-in-out infinite;
+          z-index: 6;
+        }
+        @keyframes urgentPulse {
+          0%, 100% { transform: translate(-50%, -100%) scale(1); }
+          50% { transform: translate(-50%, -100%) scale(1.3); }
         }
         .activity-scroll::-webkit-scrollbar { width: 4px; }
         .activity-scroll::-webkit-scrollbar-track { background: transparent; }

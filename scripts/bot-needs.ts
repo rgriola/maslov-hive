@@ -24,13 +24,13 @@ export interface NeedDecayRates {
 
 // Default decay rates (points per minute)
 export const DEFAULT_DECAY_RATES: NeedDecayRates = {
-  water: 100,       // ~1 min to go from 100 to 0 (testing)
+  water: 100,        // ~1 min to go from 100 to 0 (testing)
   food: 50,          // ~2 min to go from 100 to 0 (testing)
   sleep: 25,         // ~4 min to go from 100 to 0 (testing)
-  shelter: 0.1,      // Weather-dependent
-  clothing: 0.1,     // Weather-dependent
-  homeostasis: 0.15, // Affected by other needs
-  reproduction: 0.05, // ~33 hours
+  shelter: 0.1,      // Weather-dependent (restored during sleep)
+  clothing: 8,       // ~12 min cycle (restored during sleep in shelter)
+  homeostasis: 5,    // ~20 min base (accelerated by extreme weather + critical needs)
+  reproduction: 3,   // ~33 min cycle (restored by coupling)
 };
 
 // Thresholds for seeking behavior (when need drops below this, bot seeks)
@@ -46,10 +46,13 @@ export const NEED_THRESHOLDS = {
 
 // Critical thresholds (bot is in distress)
 export const CRITICAL_THRESHOLDS = {
+  air: 15,
   water: 10,
   food: 10,
   sleep: 5,
+  clothing: 10,
   homeostasis: 10,
+  reproduction: 5,
 };
 
 /**
@@ -80,9 +83,9 @@ export function decayNeeds(
   rates: Partial<NeedDecayRates> = {}
 ): PhysicalNeeds {
   const effectiveRates = { ...DEFAULT_DECAY_RATES, ...rates };
-  
+
   return {
-    air: needs.air, // Air doesn't decay (always available for now)
+    air: Math.max(0, needs.air - effectiveRates.water * minutes * 0.35), // Air decays (auto-restored on server)
     water: Math.max(0, needs.water - effectiveRates.water * minutes),
     food: Math.max(0, needs.food - effectiveRates.food * minutes),
     sleep: Math.max(0, needs.sleep - effectiveRates.sleep * minutes),
@@ -118,26 +121,26 @@ export function getMostUrgentNeed(needs: PhysicalNeeds): {
   value: number;
   threshold: number;
 } {
-  // Check critical needs first (exclude air - always fulfilled)
-  const criticalNeeds: (keyof PhysicalNeeds)[] = ['water', 'food', 'sleep', 'homeostasis'];
-  
+  // Check critical needs first — air is highest priority
+  const criticalNeeds: (keyof PhysicalNeeds)[] = ['air', 'water', 'food', 'sleep', 'homeostasis'];
+
   for (const needKey of criticalNeeds) {
     const threshold = NEED_THRESHOLDS[needKey as keyof typeof NEED_THRESHOLDS];
     if (threshold !== undefined && needs[needKey] < threshold) {
       return { need: needKey, value: needs[needKey], threshold };
     }
   }
-  
+
   // Check other needs
   const otherNeeds: (keyof PhysicalNeeds)[] = ['shelter', 'clothing', 'reproduction'];
-  
+
   for (const needKey of otherNeeds) {
     const threshold = NEED_THRESHOLDS[needKey as keyof typeof NEED_THRESHOLDS];
     if (threshold !== undefined && needs[needKey] < threshold) {
       return { need: needKey, value: needs[needKey], threshold };
     }
   }
-  
+
   return { need: null, value: 100, threshold: 0 };
 }
 
@@ -146,9 +149,11 @@ export function getMostUrgentNeed(needs: PhysicalNeeds): {
  */
 export function isInCriticalCondition(needs: PhysicalNeeds): boolean {
   return (
+    needs.air < CRITICAL_THRESHOLDS.air ||
     needs.water < CRITICAL_THRESHOLDS.water ||
     needs.food < CRITICAL_THRESHOLDS.food ||
     needs.sleep < CRITICAL_THRESHOLDS.sleep ||
+    needs.clothing < CRITICAL_THRESHOLDS.clothing ||
     needs.homeostasis < CRITICAL_THRESHOLDS.homeostasis
   );
 }

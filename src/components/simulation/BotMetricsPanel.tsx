@@ -276,6 +276,61 @@ export function BotMetricsPanel({
         </div>
       )}
 
+      {/* Awareness — nearby bots */}
+      {selectedBotInfo.awareness && selectedBotInfo.awareness.length > 0 && (
+        <div style={{
+          padding: '12px',
+          background: 'rgba(255,255,255,0.03)',
+          borderRadius: '10px',
+          marginBottom: '12px',
+        }}>
+          <div style={{
+            color: uiTheme.textSecondary,
+            fontSize: '10px',
+            letterSpacing: '1px',
+            textTransform: 'uppercase' as const,
+            marginBottom: '10px',
+          }}>
+            👁️ Awareness ({selectedBotInfo.awareness.length})
+          </div>
+
+          {selectedBotInfo.awareness.map((nearby) => (
+            <div
+              key={nearby.botId}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: '6px 8px',
+                background: 'rgba(255,255,255,0.04)',
+                borderRadius: '6px',
+                marginBottom: '4px',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <span style={{ fontSize: '14px' }}>
+                  {nearby.urgentNeed || '✅'}
+                </span>
+                <span style={{
+                  color: uiTheme.textPrimary,
+                  fontSize: '12px',
+                  fontWeight: 500,
+                }}>
+                  {nearby.botName}
+                </span>
+              </div>
+              <span style={{
+                color: uiTheme.textMuted,
+                fontSize: '10px',
+                fontFamily: 'monospace',
+              }}>
+                {nearby.distance}m
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+
       {/* Bot ID */}
       <div style={{
         fontSize: '10px',

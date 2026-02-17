@@ -50,6 +50,13 @@ export interface BotNeeds {
 
 // ─── Bot Data Types ───────────────────────────────────────────
 
+export interface NearbyBotInfo {
+  botId: string;
+  botName: string;
+  distance: number;
+  urgentNeed?: string; // emoji of their most urgent need
+}
+
 export interface BotData {
   botId: string;
   botName: string;
@@ -64,6 +71,8 @@ export interface BotData {
   color?: string;   // hex color (from WebSocket bridge)
   shape?: string;   // geometry type: 'box' | 'sphere' | 'cone' | 'cylinder'
   needs?: BotNeeds;
+  urgentNeed?: string;      // emoji for most urgent need (e.g. 💧)
+  awareness?: NearbyBotInfo[]; // bots within 2m
   inventory?: {
     wood: number;
     stone: number;
@@ -105,10 +114,15 @@ export interface BotState {
     water: { seeking: boolean; critical: boolean; zero: boolean };
     food: { seeking: boolean; critical: boolean; zero: boolean };
     sleep: { seeking: boolean; critical: boolean; zero: boolean };
+    air: { seeking: boolean; critical: boolean; zero: boolean };
+    clothing: { seeking: boolean; critical: boolean; zero: boolean };
+    homeostasis: { seeking: boolean; critical: boolean; zero: boolean };
+    reproduction: { seeking: boolean; critical: boolean; zero: boolean };
   };
   seeking?: boolean;
   critical?: boolean; // low needs check
   zero?: boolean;     // 0 needs check
+  partnerId?: string; // Bot currently coupling with for reproduction
   inventory: {
     wood: number;
     stone: number;
@@ -148,6 +162,7 @@ export interface BotEntity {
   mesh: THREE.Mesh;
   label: HTMLDivElement;
   speechBubble: HTMLDivElement;
+  urgentNeedLabel: HTMLDivElement;
   targetPos: THREE.Vector3;
   data: BotData;
   postCount: number;
@@ -193,6 +208,8 @@ export interface SelectedBotInfo {
   height?: number;
   lastPostTime?: string;
   needs?: BotNeeds;
+  urgentNeed?: string;
+  awareness?: NearbyBotInfo[];
   inventory?: {
     wood: number;
     stone: number;

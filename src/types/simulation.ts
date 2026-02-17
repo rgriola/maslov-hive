@@ -69,6 +69,74 @@ export interface BotData {
   };
 }
 
+// ─── Backend/Bridge Shared Types ────────────────────────────────
+
+export interface NavNode {
+  x: number;
+  z: number;
+  g: number;
+  h: number;
+  f: number;
+  parent: NavNode | null;
+}
+
+export interface BotState {
+  botId: string;
+  botName: string;
+  personality: string;
+  x: number;
+  y: number;
+  z: number;
+  targetX: number;
+  targetY: number;
+  targetZ: number;
+  speed?: number; // Optional, defaults used in bridge
+  width: number;
+  height: number;
+  color: string;
+  state: string; // 'idle' | 'walking' | 'thinking' | 'sleeping'
+  lastPostTitle?: string;
+  lastPostTime?: number;
+  needs?: BotNeeds;
+  lastNeedUpdate?: Date;
+  needsPostTracker?: {
+    water: { seeking: boolean; critical: boolean; zero: boolean };
+    food: { seeking: boolean; critical: boolean; zero: boolean };
+    sleep: { seeking: boolean; critical: boolean; zero: boolean };
+  };
+  seeking?: boolean;
+  critical?: boolean; // low needs check
+  zero?: boolean;     // 0 needs check
+  inventory: {
+    wood: number;
+    stone: number;
+  };
+  shelterId?: string;
+  path: Array<{ x: number; z: number }>;
+  pathIndex: number;
+}
+
+export interface WorldConfig {
+  groundRadius: number;
+  botCount: number;
+  waterSpots: Array<{ x: number; z: number; radius: number }>;
+  foodSpots: Array<{ x: number; z: number; radius: number }>;
+  woodSpots: Array<{ x: number; z: number; radius: number; available: number }>;
+  stoneSpots: Array<{ x: number; z: number; radius: number; available: number }>;
+  shelters: ShelterData[]; // Array for easier iteration/finding
+  sundial: { x: number; z: number; radius: number };
+}
+
+export interface ShelterData {
+  id: string;
+  type: string;
+  x: number;
+  z: number;
+  ownerId: string | null;
+  built: boolean;
+  buildProgress: number; // 0 to 100
+}
+
 // ─── Three.js Bot Entity ───────────────────────────────────────
 
 import * as THREE from 'three';

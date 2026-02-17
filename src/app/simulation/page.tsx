@@ -11,8 +11,6 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 
 // Types
 import type {
-  AirQualityData,
-  WeatherData,
   BotData,
   BotEntity,
   ActivityMessage,
@@ -26,6 +24,20 @@ import { calculateSunPosition } from '@/utils/solar';
 
 // Config
 import { BOT_VISUALS } from '@/config/bot-visuals';
+
+// Hooks
+import { useWeather } from '@/hooks/useWeather';
+
+// Scene object factories
+import {
+  createWaterSpot,
+  createCornField,
+  createForest,
+  createQuarry,
+  createSundial,
+  buildShelterMesh,
+  disposeObject3D,
+} from '@/lib/scene-objects';
 
 // Components
 import {
@@ -66,7 +78,7 @@ export default function SimulationPage() {
   const [selectedBotInfo, setSelectedBotInfo] = useState<SelectedBotInfo | null>(null);
   const [currentTime, setCurrentTime] = useState<Date | null>(null); // null until client mount
   const [location, setLocation] = useState<{ lat: number; lng: number } | null>(null);
-  const [weather, setWeather] = useState<WeatherData | null>(null);
+  const weather = useWeather({ location });
   const [showAirQuality, setShowAirQuality] = useState(false);
   const [showPhysicalNeeds, setShowPhysicalNeeds] = useState(false);
   // Particle system refs for weather effects
@@ -80,7 +92,7 @@ export default function SimulationPage() {
   // Resource spots for building
   const woodSpotsRef = useRef<THREE.Object3D[]>([]); // Forest trees
   const stoneSpotsRef = useRef<THREE.Object3D[]>([]); // Quarry rocks
-  const sheltersRef = useRef<Map<string, THREE.Object3D>>(new Map()); // Bot shelters
+  const sheltersRef = useRef<Map<string, THREE.Group>>(new Map()); // Bot shelters
   const sundialRef = useRef<THREE.Object3D | null>(null); // Community sundial
   const woodInitializedRef = useRef<boolean>(false);
   const stoneInitializedRef = useRef<boolean>(false);
@@ -105,101 +117,13 @@ export default function SimulationPage() {
     }
   }, []);
 
-  // ─── Fetch Weather Data ────────────────────────────────────
-  useEffect(() => {
-    const fetchWeather = async (lat: number, lng: number) => {
-      try {
-        const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}&current=temperature_2m,apparent_temperature,weather_code,cloud_cover,precipitation,relative_humidity_2m,wind_speed_10m,is_day&temperature_unit=fahrenheit&wind_speed_unit=mph&precipitation_unit=mm`;
-        const response = await fetch(url);
-        if (!response.ok) return;
-        const data = await response.json();
-        const current = data.current;
-        
-        // WMO weather code interpretation
-        const weatherCode = current.weather_code;
-        const isRainCode = [51,53,55,56,57,61,63,65,66,67,80,81,82,95,96,99].includes(weatherCode);
-        const isSnowCode = [71,73,75,77,85,86].includes(weatherCode);
-        const isFogCode = [45,48].includes(weatherCode);
-        const isStormCode = [82,95,96,99].includes(weatherCode);
-        
-        const conditions: Record<number, string> = {
-          0: 'Clear', 1: 'Mainly clear', 2: 'Partly cloudy', 3: 'Overcast',
-          45: 'Foggy', 48: 'Rime fog', 51: 'Light drizzle', 53: 'Drizzle',
-          55: 'Heavy drizzle', 61: 'Light rain', 63: 'Rain', 65: 'Heavy rain',
-          71: 'Light snow', 73: 'Snow', 75: 'Heavy snow', 77: 'Snow grains',
-          80: 'Rain showers', 81: 'Rain showers', 82: 'Heavy showers',
-          85: 'Snow showers', 86: 'Heavy snow showers', 95: 'Thunderstorm',
-          96: 'Thunderstorm', 99: 'Severe thunderstorm'
-        };
-        
-        // Fetch air quality in parallel
-        let airQuality: AirQualityData | undefined;
-        try {
-          const aqUrl = `https://air-quality-api.open-meteo.com/v1/air-quality?latitude=${lat}&longitude=${lng}&current=us_aqi,european_aqi,pm10,pm2_5,carbon_monoxide,nitrogen_dioxide,sulphur_dioxide,ozone`;
-          const aqResponse = await fetch(aqUrl);
-          if (aqResponse.ok) {
-            const aqData = await aqResponse.json();
-            const aq = aqData.current;
-            const aqi = aq.us_aqi;
-            let quality_label = 'Unknown';
-            if (aqi <= 50) quality_label = 'Good';
-            else if (aqi <= 100) quality_label = 'Moderate';
-            else if (aqi <= 150) quality_label = 'Unhealthy for Sensitive Groups';
-            else if (aqi <= 200) quality_label = 'Unhealthy';
-            else if (aqi <= 300) quality_label = 'Very Unhealthy';
-            else quality_label = 'Hazardous';
-            
-            airQuality = {
-              us_aqi: Math.round(aq.us_aqi || 0),
-              european_aqi: Math.round(aq.european_aqi || 0),
-              pm10: Math.round(aq.pm10 * 10) / 10,
-              pm2_5: Math.round(aq.pm2_5 * 10) / 10,
-              carbon_monoxide: Math.round(aq.carbon_monoxide || 0),
-              nitrogen_dioxide: Math.round(aq.nitrogen_dioxide * 10) / 10,
-              sulphur_dioxide: Math.round(aq.sulphur_dioxide * 10) / 10,
-              ozone: Math.round(aq.ozone * 10) / 10,
-              quality_label,
-            };
-          }
-        } catch (aqError) {
-          console.error('Air quality fetch failed:', aqError);
-        }
-        
-        setWeather({
-          temperature: Math.round(current.temperature_2m),
-          feelsLike: Math.round(current.apparent_temperature),
-          condition: conditions[weatherCode] || 'Clear',
-          weatherCode,
-          cloudCover: current.cloud_cover,
-          precipitation: current.precipitation,
-          humidity: current.relative_humidity_2m,
-          windSpeed: Math.round(current.wind_speed_10m),
-          isDay: current.is_day === 1,
-          isRaining: isRainCode || current.precipitation > 0,
-          isSnowing: isSnowCode,
-          isCloudy: current.cloud_cover > 50,
-          isFoggy: isFogCode,
-          isStormy: isStormCode,
-          airQuality,
-        });
-      } catch (error) {
-        console.error('Weather fetch failed:', error);
-      }
-    };
-
-    // Fetch when location is available, then refresh every 10 minutes
-    const lat = location?.lat ?? 40.7128;
-    const lng = location?.lng ?? -74.006;
-    fetchWeather(lat, lng);
-    const interval = setInterval(() => fetchWeather(lat, lng), 10 * 60 * 1000);
-    return () => clearInterval(interval);
-  }, [location]);
+  // Weather data is now fetched via the useWeather hook above
 
   // ─── Update Weather Visual Effects ────────────────────────
   useEffect(() => {
     const rain = rainParticlesRef.current;
     const snow = cloudParticlesRef.current;
-    
+
     if (rain) {
       rain.visible = weather?.isRaining ?? false;
       // Adjust rain opacity based on intensity
@@ -208,11 +132,11 @@ export default function SimulationPage() {
         rain.material.opacity = intensity;
       }
     }
-    
+
     if (snow) {
       snow.visible = weather?.isSnowing ?? false;
     }
-    
+
     // Adjust fog for weather
     const scene = sceneRef.current;
     if (scene && scene.fog instanceof THREE.FogExp2) {
@@ -229,33 +153,33 @@ export default function SimulationPage() {
   // ─── Dynamic Lighting Update ────────────────────────────────
   useEffect(() => {
     if (!sceneRef.current || !sunLightRef.current || !ambientLightRef.current || !currentTime) return;
-    
+
     const lat = location?.lat ?? 40.7128; // Default NYC if no location
     const lng = location?.lng ?? -74.006;
     const { altitude, azimuth } = calculateSunPosition(currentTime, lat, lng);
-    
+
     // Sun position in 3D space (radius 25 from origin)
     const sunRadius = 25;
     const sunX = sunRadius * Math.cos(altitude) * Math.sin(azimuth);
     const sunY = sunRadius * Math.sin(altitude);
     const sunZ = sunRadius * Math.cos(altitude) * Math.cos(azimuth);
-    
+
     const sunLight = sunLightRef.current;
     const moonLight = moonLightRef.current;
     const ambientLight = ambientLightRef.current;
     const renderer = rendererRef.current;
     const scene = sceneRef.current;
-    
+
     // Normalize altitude to 0-1 range (below horizon to zenith)
     const normalizedAlt = (altitude + Math.PI / 2) / Math.PI;
     const sunUp = altitude > 0;
-    
+
     if (sunUp) {
       // Daytime: sun is up
       sunLight.position.set(sunX, Math.max(sunY, 2), sunZ);
       sunLight.visible = true;
       if (moonLight) moonLight.visible = false;
-      
+
       // Sun color: warm at horizon, white at zenith
       const horizonFactor = Math.max(0, 1 - altitude / (Math.PI / 4)); // 0 at 45°+, 1 at horizon
       const sunColor = new THREE.Color().setHSL(
@@ -265,11 +189,11 @@ export default function SimulationPage() {
       );
       sunLight.color = sunColor;
       sunLight.intensity = 0.8 + normalizedAlt * 0.8; // 0.8 to 1.6
-      
+
       // Ambient light: blue-ish during day
       ambientLight.color.setHSL(0.6, 0.2, 0.4 + normalizedAlt * 0.2);
       ambientLight.intensity = 0.6 + normalizedAlt * 0.4;
-      
+
       // Sky color: from orange/pink at horizon to blue at zenith
       if (renderer && scene) {
         const skyHue = horizonFactor > 0.5 ? 0.05 : 0.6; // Orange/pink vs blue
@@ -287,18 +211,18 @@ export default function SimulationPage() {
         moonLight.intensity = 0.3;
         moonLight.color.setHSL(0.6, 0.1, 0.9); // Pale blue-white
       }
-      
+
       // Ambient: dark blue at night
       const nightDepth = Math.min(1, -altitude / (Math.PI / 6)); // How deep into night
       ambientLight.color.setHSL(0.65, 0.4, 0.15);
       ambientLight.intensity = 0.15 + (1 - nightDepth) * 0.2;
-      
+
       // Night sky
       if (renderer && scene) {
         scene.background = new THREE.Color().setHSL(0.65, 0.5, 0.02 + (1 - nightDepth) * 0.08);
       }
     }
-    
+
     // Update shadow camera position to follow sun/moon
     sunLight.shadow.camera.updateProjectionMatrix();
   }, [currentTime, location]);
@@ -320,14 +244,14 @@ export default function SimulationPage() {
         dayFactor: 0,
       };
     }
-    
+
     const lat = location?.lat ?? 40.7128;
     const lng = location?.lng ?? -74.006;
     const { altitude } = calculateSunPosition(currentTime, lat, lng);
-    
+
     // Normalize: 0 = midnight, 1 = noon
     const dayFactor = Math.max(0, Math.min(1, (altitude + 0.15) / (Math.PI / 2 + 0.15)));
-    
+
     // Panel colors transition from dark (night) to light (day)
     const panelBg = `rgba(${Math.round(10 + dayFactor * 230)}, ${Math.round(10 + dayFactor * 230)}, ${Math.round(26 + dayFactor * 220)}, ${0.95 - dayFactor * 0.15})`;
     const panelBgHex = rgbToHex(
@@ -336,15 +260,15 @@ export default function SimulationPage() {
       Math.round(26 + dayFactor * 220)
     );
     const borderColor = `rgba(${Math.round(74 + dayFactor * 100)}, ${Math.round(158 + dayFactor * 50)}, ${Math.round(255 - dayFactor * 50)}, ${0.15 + dayFactor * 0.2})`;
-    
+
     // WCAG AA compliant text colors for both day and night modes
     const textPrimary = dayFactor > 0.5 ? '#1a1a1a' : '#ffffff';
     const textSecondary = dayFactor > 0.5 ? '#3a3a3a' : '#c9d1d9';  // 7.5:1 on dark, 10.5:1 on light
     const textMuted = dayFactor > 0.5 ? '#5a5a5a' : '#8b949e';      // 4.6:1 on dark, 6.4:1 on light
-    
+
     const cardBg = dayFactor > 0.5 ? 'rgba(0,0,0,0.05)' : 'rgba(255,255,255,0.05)';
     const cardBgHover = dayFactor > 0.5 ? 'rgba(74,158,255,0.15)' : 'rgba(74,158,255,0.12)';
-    
+
     return { panelBg, panelBgHex, borderColor, textPrimary, textSecondary, textMuted, cardBg, cardBgHover, dayFactor };
   }, [currentTime, location]);
 
@@ -428,78 +352,45 @@ export default function SimulationPage() {
       entity.speechBubble.remove();
     }
     botsRef.current.clear();
-    
+
     // Clear corn field so it can be recreated
     foodSpotsRef.current.forEach(obj => {
       if (sceneRef.current) sceneRef.current.remove(obj);
-      obj.traverse((child) => {
-        if (child instanceof THREE.Mesh) {
-          child.geometry.dispose();
-          if (Array.isArray(child.material)) {
-            child.material.forEach(mat => mat.dispose());
-          } else {
-            child.material.dispose();
-          }
-        }
-      });
+      disposeObject3D(obj);
     });
     foodSpotsRef.current = [];
     cornInitializedRef.current = false;
     cornTargetScaleRef.current = 1;
-    
+
     // Clear wood/stone/shelters so they can be recreated
     woodSpotsRef.current.forEach(obj => {
       if (sceneRef.current) sceneRef.current.remove(obj);
-      obj.traverse((child) => {
-        if (child instanceof THREE.Mesh) {
-          child.geometry.dispose();
-          if (Array.isArray(child.material)) child.material.forEach(mat => mat.dispose());
-          else child.material.dispose();
-        }
-      });
+      disposeObject3D(obj);
     });
     woodSpotsRef.current = [];
     woodInitializedRef.current = false;
-    
+
     stoneSpotsRef.current.forEach(obj => {
       if (sceneRef.current) sceneRef.current.remove(obj);
-      obj.traverse((child) => {
-        if (child instanceof THREE.Mesh) {
-          child.geometry.dispose();
-          if (Array.isArray(child.material)) child.material.forEach(mat => mat.dispose());
-          else child.material.dispose();
-        }
-      });
+      disposeObject3D(obj);
     });
     stoneSpotsRef.current = [];
     stoneInitializedRef.current = false;
-    
+
     sheltersRef.current.forEach(obj => {
       if (sceneRef.current) sceneRef.current.remove(obj);
-      obj.traverse((child) => {
-        if (child instanceof THREE.Mesh) {
-          child.geometry.dispose();
-          if (Array.isArray(child.material)) child.material.forEach(mat => mat.dispose());
-          else child.material.dispose();
-        }
-      });
+      disposeObject3D(obj);
     });
     sheltersRef.current.clear();
-    
+
     // Remove sundial if it exists
     if (sundialRef.current && sceneRef.current) {
       sceneRef.current.remove(sundialRef.current);
-      sundialRef.current.traverse((child) => {
-        if (child instanceof THREE.Mesh) {
-          child.geometry.dispose();
-          if (Array.isArray(child.material)) child.material.forEach(mat => mat.dispose());
-          else child.material.dispose();
-        }
-      });
+      disposeObject3D(sundialRef.current);
       sundialRef.current = null;
     }
     sundialInitializedRef.current = false;
-    
+
     // Reconnect WebSocket to get fresh world:init
     if (wsRef.current) {
       wsRef.current.close();
@@ -512,7 +403,7 @@ export default function SimulationPage() {
     // Side length = √(botCount × 75)
     const SQUARE_METERS_PER_BOT = 75;
     const MIN_SIZE = 10; // minimum 10x10 for empty world
-    
+
     const area = Math.max(1, botCount) * SQUARE_METERS_PER_BOT;
     const size = Math.sqrt(area);
     return Math.max(MIN_SIZE, Math.round(size));
@@ -524,7 +415,7 @@ export default function SimulationPage() {
 
     const botCount = botsRef.current.size;
     const size = calculateGroundSize(botCount);
-    
+
     // Only resize if size changed significantly (avoid constant updates)
     const currentSize = (groundRef.current.geometry as THREE.PlaneGeometry).parameters.width;
     if (Math.abs(currentSize - size) < 2) return;
@@ -630,7 +521,7 @@ export default function SimulationPage() {
     };
 
     botsRef.current.set(data.botId, entity);
-    
+
     // Resize ground based on new bot count
     resizeGroundForBots();
   }, [resizeGroundForBots]);
@@ -769,17 +660,17 @@ export default function SimulationPage() {
     const rainGeometry = new THREE.BufferGeometry();
     const rainPositions = new Float32Array(rainCount * 3);
     const rainVelocities = new Float32Array(rainCount); // Store Y velocity
-    
+
     for (let i = 0; i < rainCount; i++) {
       rainPositions[i * 3] = (Math.random() - 0.5) * 60;     // X
       rainPositions[i * 3 + 1] = Math.random() * 30;          // Y
       rainPositions[i * 3 + 2] = (Math.random() - 0.5) * 60;  // Z
       rainVelocities[i] = 0.3 + Math.random() * 0.4;          // Fall speed
     }
-    
+
     rainGeometry.setAttribute('position', new THREE.BufferAttribute(rainPositions, 3));
     rainGeometry.setAttribute('velocity', new THREE.BufferAttribute(rainVelocities, 1));
-    
+
     const rainMaterial = new THREE.PointsMaterial({
       color: 0x6699cc,
       size: 0.1,
@@ -787,7 +678,7 @@ export default function SimulationPage() {
       opacity: 0.6,
       blending: THREE.AdditiveBlending,
     });
-    
+
     const rainParticles = new THREE.Points(rainGeometry, rainMaterial);
     rainParticles.visible = false; // Hidden by default
     scene.add(rainParticles);
@@ -798,17 +689,17 @@ export default function SimulationPage() {
     const snowGeometry = new THREE.BufferGeometry();
     const snowPositions = new Float32Array(snowCount * 3);
     const snowDrifts = new Float32Array(snowCount); // Horizontal drift
-    
+
     for (let i = 0; i < snowCount; i++) {
       snowPositions[i * 3] = (Math.random() - 0.5) * 60;
       snowPositions[i * 3 + 1] = Math.random() * 25;
       snowPositions[i * 3 + 2] = (Math.random() - 0.5) * 60;
       snowDrifts[i] = (Math.random() - 0.5) * 0.02;
     }
-    
+
     snowGeometry.setAttribute('position', new THREE.BufferAttribute(snowPositions, 3));
     snowGeometry.setAttribute('drift', new THREE.BufferAttribute(snowDrifts, 1));
-    
+
     const snowMaterial = new THREE.PointsMaterial({
       color: 0xffffff,
       size: 0.15,
@@ -816,7 +707,7 @@ export default function SimulationPage() {
       opacity: 0.8,
       blending: THREE.AdditiveBlending,
     });
-    
+
     const snowParticles = new THREE.Points(snowGeometry, snowMaterial);
     snowParticles.visible = false;
     scene.add(snowParticles);
@@ -878,10 +769,10 @@ export default function SimulationPage() {
       if (rainParticles.visible) {
         const positions = rainGeometry.attributes.position.array as Float32Array;
         const velocities = rainGeometry.attributes.velocity.array as Float32Array;
-        
+
         for (let i = 0; i < rainCount; i++) {
           positions[i * 3 + 1] -= velocities[i]; // Fall down
-          
+
           // Reset to top when below ground
           if (positions[i * 3 + 1] < 0) {
             positions[i * 3 + 1] = 25 + Math.random() * 5;
@@ -896,12 +787,12 @@ export default function SimulationPage() {
       if (snowParticles.visible) {
         const positions = snowGeometry.attributes.position.array as Float32Array;
         const drifts = snowGeometry.attributes.drift.array as Float32Array;
-        
+
         for (let i = 0; i < snowCount; i++) {
           positions[i * 3 + 1] -= 0.03; // Slow fall
           positions[i * 3] += drifts[i] + Math.sin(elapsed + i) * 0.005; // Drift
           positions[i * 3 + 2] += Math.cos(elapsed * 0.7 + i) * 0.003;
-          
+
           // Reset to top when below ground
           if (positions[i * 3 + 1] < 0) {
             positions[i * 3 + 1] = 20 + Math.random() * 5;
@@ -916,7 +807,7 @@ export default function SimulationPage() {
       for (const cornGroup of foodSpotsRef.current) {
         const currentScale = cornGroup.scale.x;
         const targetScale = cornTargetScaleRef.current;
-        
+
         // Smoothly interpolate toward target scale
         if (Math.abs(currentScale - targetScale) > 0.01) {
           const newScale = currentScale + (targetScale - currentScale) * 0.05;
@@ -940,31 +831,31 @@ export default function SimulationPage() {
     // ─── Click Handler for Bot Selection ───────────────
     function onCanvasClick(event: MouseEvent) {
       if (!raycasterRef.current || !cameraRef.current) return;
-      
+
       // Calculate mouse position in normalized device coordinates
       const rect = renderer.domElement.getBoundingClientRect();
       mouseRef.current.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
       mouseRef.current.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
-      
+
       // Update raycaster
       raycasterRef.current.setFromCamera(mouseRef.current, camera);
-      
+
       // Get all bot meshes
       const botMeshes: THREE.Mesh[] = [];
       for (const entity of botsRef.current.values()) {
         botMeshes.push(entity.mesh);
       }
-      
+
       // Check for intersections
       const intersects = raycasterRef.current.intersectObjects(botMeshes, false);
-      
+
       if (intersects.length > 0) {
         const clickedMesh = intersects[0].object as THREE.Mesh;
         const botId = clickedMesh.userData.botId;
-        
+
         if (botId) {
           const entity = botsRef.current.get(botId);
-          
+
           // Set selected bot info for metrics panel
           if (entity) {
             const visual = BOT_VISUALS[entity.data.personality] || BOT_VISUALS.tech;
@@ -981,21 +872,21 @@ export default function SimulationPage() {
               inventory: entity.data.inventory,
             });
           }
-          
+
           if (entity && entity.recentPost) {
             // Show recent post in speech bubble
             entity.speechBubble.textContent = entity.recentPost.text;
             entity.speechBubble.style.display = 'block';
-            
+
             // Auto-hide after 8 seconds
             setTimeout(() => {
               entity.speechBubble.style.display = 'none';
             }, 8000);
-            
+
             // Select in detail panel
             setSelectedPost(entity.recentPost);
             setPostDetail(null);
-            
+
             // Fetch post details if we have a postId
             if (entity.recentPost.postId) {
               setDetailLoading(true);
@@ -1072,493 +963,77 @@ export default function SimulationPage() {
                   scene.add(newGrid);
                   gridRef.current = newGrid;
                 }
-                
+
                 // Render water spots for bot survival
                 if (msg.data.worldConfig.waterSpots) {
-                  // Remove old water spots
-                  waterSpotsRef.current.forEach(mesh => {
-                    scene.remove(mesh);
-                    mesh.geometry.dispose();
-                    if (Array.isArray(mesh.material)) {
-                      mesh.material.forEach(mat => mat.dispose());
-                    } else {
-                      mesh.material.dispose();
-                    }
-                  });
+                  waterSpotsRef.current.forEach(mesh => { scene.remove(mesh); disposeObject3D(mesh); });
                   waterSpotsRef.current = [];
-                  
-                  // Create new water spots
                   msg.data.worldConfig.waterSpots.forEach((spot: { x: number; z: number; radius: number }) => {
-                    const waterGeo = new THREE.CircleGeometry(spot.radius, 32);
-                    const waterMat = new THREE.MeshStandardMaterial({
-                      color: 0x2196f3,
-                      metalness: 0.8,
-                      roughness: 0.2,
-                      transparent: true,
-                      opacity: 0.7,
-                    });
-                    const waterMesh = new THREE.Mesh(waterGeo, waterMat);
-                    waterMesh.rotation.x = -Math.PI / 2;
-                    waterMesh.position.set(spot.x, 0.02, spot.z); // Slightly above ground
+                    const waterMesh = createWaterSpot(spot);
                     scene.add(waterMesh);
                     waterSpotsRef.current.push(waterMesh);
-                    console.log(`💧 Rendered water spot at (${spot.x.toFixed(1)}, ${spot.z.toFixed(1)}) with radius ${spot.radius}m`);
                   });
                 }
-                
+
                 // Render food spots for bot survival (only create once)
                 if (msg.data.worldConfig.foodSpots && !cornInitializedRef.current) {
                   cornInitializedRef.current = true;
-                  
-                  // Create new food spots as corn stalks
                   msg.data.worldConfig.foodSpots.forEach((spot: { x: number; z: number; radius: number }) => {
-                    // Create a group to hold all corn stalks
-                    const cornGroup = new THREE.Group();
-                    cornGroup.position.set(spot.x, 0, spot.z);
-                    cornGroup.scale.set(0, 0, 0); // Start at scale 0 for grow animation
-                    
-                    // Store spot info for later reference
-                    cornGroup.userData = { spotX: spot.x, spotZ: spot.z, radius: spot.radius };
-                    
-                    // Number of stalks based on radius
-                    const stalkCount = Math.floor(spot.radius * 8);
-                    
-                    for (let i = 0; i < stalkCount; i++) {
-                      // Fixed position within the spot radius (deterministic grid)
-                      const gridAngle = (i / stalkCount) * Math.PI * 2;
-                      const ringIndex = Math.floor(i / 6);
-                      const dist = (0.3 + ringIndex * 0.35) * Math.min(spot.radius * 0.9, 1.2);
-                      const sx = Math.cos(gridAngle + ringIndex * 0.3) * dist;
-                      const sz = Math.sin(gridAngle + ringIndex * 0.3) * dist;
-                      
-                      // Stalk height varies but is fixed per position
-                      const stalkHeight = 0.9 + (i % 3) * 0.25;
-                      
-                      // Green stalk (cylinder)
-                      const stalkGeo = new THREE.CylinderGeometry(0.03, 0.04, stalkHeight, 6);
-                      const stalkMat = new THREE.MeshStandardMaterial({
-                        color: 0x228b22, // Forest green
-                        metalness: 0.1,
-                        roughness: 0.8,
-                      });
-                      const stalk = new THREE.Mesh(stalkGeo, stalkMat);
-                      stalk.position.set(sx, stalkHeight / 2, sz);
-                      // Slight deterministic lean based on position
-                      stalk.rotation.x = Math.sin(i * 1.3) * 0.1;
-                      stalk.rotation.z = Math.cos(i * 1.7) * 0.1;
-                      stalk.castShadow = true;
-                      cornGroup.add(stalk);
-                      
-                      // Yellow corn cob at top
-                      const cobGeo = new THREE.CylinderGeometry(0.05, 0.04, 0.2, 8);
-                      const cobMat = new THREE.MeshStandardMaterial({
-                        color: 0xffd700, // Gold/yellow
-                        metalness: 0.2,
-                        roughness: 0.6,
-                      });
-                      const cob = new THREE.Mesh(cobGeo, cobMat);
-                      cob.position.set(sx, stalkHeight - 0.05, sz);
-                      cob.rotation.x = stalk.rotation.x;
-                      cob.rotation.z = stalk.rotation.z;
-                      cornGroup.add(cob);
-                      
-                      // Green leaf/husk around cob
-                      const leafGeo = new THREE.ConeGeometry(0.08, 0.15, 4);
-                      const leafMat = new THREE.MeshStandardMaterial({
-                        color: 0x32cd32, // Lime green
-                        metalness: 0.1,
-                        roughness: 0.9,
-                        side: THREE.DoubleSide,
-                      });
-                      const leaf = new THREE.Mesh(leafGeo, leafMat);
-                      leaf.position.set(sx, stalkHeight + 0.05, sz);
-                      leaf.rotation.x = Math.PI + stalk.rotation.x;
-                      cornGroup.add(leaf);
-                    }
-                    
-                    // Add dirt patch underneath
-                    const dirtGeo = new THREE.CircleGeometry(spot.radius, 16);
-                    const dirtMat = new THREE.MeshStandardMaterial({
-                      color: 0x5c4033, // Dark brown dirt
-                      metalness: 0.0,
-                      roughness: 1.0,
-                    });
-                    const dirt = new THREE.Mesh(dirtGeo, dirtMat);
-                    dirt.rotation.x = -Math.PI / 2;
-                    dirt.position.y = 0.01;
-                    cornGroup.add(dirt);
-                    
+                    const cornGroup = createCornField(spot);
                     scene.add(cornGroup);
                     foodSpotsRef.current.push(cornGroup);
-                    console.log(`🌽 Rendered corn field at (${spot.x.toFixed(1)}, ${spot.z.toFixed(1)}) with ${stalkCount} stalks`);
                   });
-                  
-                  // Set target scale to 1 to trigger grow animation
                   cornTargetScaleRef.current = 1;
                 }
-                
+
                 // Render wood spots (forest with trees) - only create once
                 if (msg.data.worldConfig.woodSpots && !woodInitializedRef.current) {
                   woodInitializedRef.current = true;
-                  
                   msg.data.worldConfig.woodSpots.forEach((spot: { x: number; z: number; radius: number }) => {
-                    const forestGroup = new THREE.Group();
-                    forestGroup.position.set(spot.x, 0, spot.z);
-                    
-                    // Create multiple trees
-                    const treeCount = Math.floor(spot.radius * 4);
-                    for (let i = 0; i < treeCount; i++) {
-                      const treeGroup = new THREE.Group();
-                      
-                      // Position trees in spots within radius
-                      const angle = (i / treeCount) * Math.PI * 2;
-                      const ring = Math.floor(i / 5);
-                      const dist = 0.4 + ring * 0.6;
-                      const tx = Math.cos(angle + ring * 0.5) * dist * Math.min(spot.radius * 0.8, 2);
-                      const tz = Math.sin(angle + ring * 0.5) * dist * Math.min(spot.radius * 0.8, 2);
-                      treeGroup.position.set(tx, 0, tz);
-                      
-                      // Tree trunk (brown cylinder)
-                      const trunkHeight = 1.2 + (i % 3) * 0.3;
-                      const trunkGeo = new THREE.CylinderGeometry(0.1, 0.15, trunkHeight, 8);
-                      const trunkMat = new THREE.MeshStandardMaterial({
-                        color: 0x8b4513, // Saddle brown
-                        metalness: 0.0,
-                        roughness: 0.9,
-                      });
-                      const trunk = new THREE.Mesh(trunkGeo, trunkMat);
-                      trunk.position.y = trunkHeight / 2;
-                      trunk.castShadow = true;
-                      treeGroup.add(trunk);
-                      
-                      // Tree foliage (green cone)
-                      const foliageHeight = 1.0 + (i % 2) * 0.4;
-                      const foliageGeo = new THREE.ConeGeometry(0.5, foliageHeight, 8);
-                      const foliageMat = new THREE.MeshStandardMaterial({
-                        color: 0x228b22, // Forest green
-                        metalness: 0.0,
-                        roughness: 0.8,
-                      });
-                      const foliage = new THREE.Mesh(foliageGeo, foliageMat);
-                      foliage.position.y = trunkHeight + foliageHeight / 2 - 0.2;
-                      foliage.castShadow = true;
-                      treeGroup.add(foliage);
-                      
-                      forestGroup.add(treeGroup);
-                    }
-                    
-                    // Brown dirt patch under forest
-                    const dirtGeo = new THREE.CircleGeometry(spot.radius, 16);
-                    const dirtMat = new THREE.MeshStandardMaterial({
-                      color: 0x654321, // Dark brown
-                      metalness: 0.0,
-                      roughness: 1.0,
-                    });
-                    const dirt = new THREE.Mesh(dirtGeo, dirtMat);
-                    dirt.rotation.x = -Math.PI / 2;
-                    dirt.position.y = 0.01;
-                    forestGroup.add(dirt);
-                    
+                    const forestGroup = createForest(spot);
                     scene.add(forestGroup);
                     woodSpotsRef.current.push(forestGroup);
-                    console.log(`🌲 Rendered forest at (${spot.x.toFixed(1)}, ${spot.z.toFixed(1)}) with ${treeCount} trees`);
                   });
                 }
-                
+
                 // Render stone spots (quarry with rocks) - only create once
                 if (msg.data.worldConfig.stoneSpots && !stoneInitializedRef.current) {
                   stoneInitializedRef.current = true;
-                  
                   msg.data.worldConfig.stoneSpots.forEach((spot: { x: number; z: number; radius: number }) => {
-                    const quarryGroup = new THREE.Group();
-                    quarryGroup.position.set(spot.x, 0, spot.z);
-                    
-                    // Create multiple rocks
-                    const rockCount = Math.floor(spot.radius * 5);
-                    for (let i = 0; i < rockCount; i++) {
-                      // Position rocks within radius
-                      const angle = (i / rockCount) * Math.PI * 2 + (i % 2) * 0.3;
-                      const dist = 0.3 + (i % 3) * 0.4;
-                      const rx = Math.cos(angle) * dist * Math.min(spot.radius * 0.7, 1.5);
-                      const rz = Math.sin(angle) * dist * Math.min(spot.radius * 0.7, 1.5);
-                      
-                      // Rock (irregular dodecahedron)
-                      const rockSize = 0.2 + (i % 3) * 0.15;
-                      const rockGeo = new THREE.DodecahedronGeometry(rockSize, 0);
-                      const rockMat = new THREE.MeshStandardMaterial({
-                        color: 0x808080, // Gray
-                        metalness: 0.1,
-                        roughness: 0.9,
-                      });
-                      const rock = new THREE.Mesh(rockGeo, rockMat);
-                      rock.position.set(rx, rockSize * 0.5, rz);
-                      rock.rotation.x = i * 0.5;
-                      rock.rotation.z = i * 0.3;
-                      rock.castShadow = true;
-                      quarryGroup.add(rock);
-                    }
-                    
-                    // Gray gravel patch under quarry
-                    const gravelGeo = new THREE.CircleGeometry(spot.radius, 16);
-                    const gravelMat = new THREE.MeshStandardMaterial({
-                      color: 0x696969, // Dim gray
-                      metalness: 0.0,
-                      roughness: 1.0,
-                    });
-                    const gravel = new THREE.Mesh(gravelGeo, gravelMat);
-                    gravel.rotation.x = -Math.PI / 2;
-                    gravel.position.y = 0.01;
-                    quarryGroup.add(gravel);
-                    
+                    const quarryGroup = createQuarry(spot);
                     scene.add(quarryGroup);
                     stoneSpotsRef.current.push(quarryGroup);
-                    console.log(`🪨 Rendered quarry at (${spot.x.toFixed(1)}, ${spot.z.toFixed(1)}) with ${rockCount} rocks`);
                   });
                 }
-                
+
                 // Render sundial (community time-keeping structure) - only create once
                 if (msg.data.worldConfig.sundial && !sundialInitializedRef.current) {
                   sundialInitializedRef.current = true;
-                  const sundial = msg.data.worldConfig.sundial;
-                  
-                  const sundialGroup = new THREE.Group();
-                  sundialGroup.position.set(sundial.x, 0, sundial.z);
-                  // Rotate to face north (negative Z direction)
-                  sundialGroup.rotation.y = Math.PI; // Face north
-                  
-                  // Circular base platform (stone)
-                  const baseRadius = sundial.radius;
-                  const baseGeo = new THREE.CylinderGeometry(baseRadius, baseRadius * 1.1, 0.15, 32);
-                  const baseMat = new THREE.MeshStandardMaterial({
-                    color: 0x8b8b83, // Stone gray
-                    metalness: 0.1,
-                    roughness: 0.9,
-                  });
-                  const base = new THREE.Mesh(baseGeo, baseMat);
-                  base.position.y = 0.075;
-                  base.castShadow = true;
-                  base.receiveShadow = true;
-                  sundialGroup.add(base);
-                  
-                  // Dial face (flat top surface with hour lines)
-                  const dialGeo = new THREE.CircleGeometry(baseRadius * 0.9, 32);
-                  const dialMat = new THREE.MeshStandardMaterial({
-                    color: 0xf5f5dc, // Beige
-                    metalness: 0.0,
-                    roughness: 0.7,
-                  });
-                  const dial = new THREE.Mesh(dialGeo, dialMat);
-                  dial.rotation.x = -Math.PI / 2;
-                  dial.position.y = 0.16;
-                  sundialGroup.add(dial);
-                  
-                  // Hour markings (12 lines radiating from center)
-                  for (let h = 0; h < 12; h++) {
-                    const angle = (h / 12) * Math.PI * 2 - Math.PI / 2; // Start from 12 o'clock
-                    const lineGeo = new THREE.BoxGeometry(0.02, 0.01, baseRadius * 0.3);
-                    const lineMat = new THREE.MeshStandardMaterial({
-                      color: 0x333333,
-                      metalness: 0.0,
-                      roughness: 0.8,
-                    });
-                    const line = new THREE.Mesh(lineGeo, lineMat);
-                    line.position.x = Math.cos(angle) * baseRadius * 0.65;
-                    line.position.z = Math.sin(angle) * baseRadius * 0.65;
-                    line.position.y = 0.17;
-                    line.rotation.y = -angle;
-                    sundialGroup.add(line);
-                  }
-                  
-                  // Triangular gnomon (the shadow-casting part)
-                  // Classic right-triangle shape pointing north
-                  const gnomonHeight = baseRadius * 0.8;
-                  const gnomonLength = baseRadius * 0.9;
-                  const gnomonShape = new THREE.Shape();
-                  gnomonShape.moveTo(0, 0);
-                  gnomonShape.lineTo(gnomonLength, 0);
-                  gnomonShape.lineTo(0, gnomonHeight);
-                  gnomonShape.lineTo(0, 0);
-                  
-                  const gnomonGeo = new THREE.ExtrudeGeometry(gnomonShape, {
-                    depth: 0.05,
-                    bevelEnabled: false,
-                  });
-                  const gnomonMat = new THREE.MeshStandardMaterial({
-                    color: 0xcd7f32, // Bronze
-                    metalness: 0.6,
-                    roughness: 0.3,
-                  });
-                  const gnomon = new THREE.Mesh(gnomonGeo, gnomonMat);
-                  gnomon.position.set(-0.025, 0.16, 0);
-                  gnomon.rotation.x = -Math.PI / 2;
-                  gnomon.rotation.z = Math.PI / 2;
-                  gnomon.castShadow = true;
-                  sundialGroup.add(gnomon);
-                  
-                  // Small decorative ring around base
-                  const ringGeo = new THREE.TorusGeometry(baseRadius * 1.05, 0.03, 8, 32);
-                  const ringMat = new THREE.MeshStandardMaterial({
-                    color: 0x4a4a4a, // Dark gray
-                    metalness: 0.3,
-                    roughness: 0.7,
-                  });
-                  const ring = new THREE.Mesh(ringGeo, ringMat);
-                  ring.rotation.x = -Math.PI / 2;
-                  ring.position.y = 0.08;
-                  sundialGroup.add(ring);
-                  
+                  const sundialGroup = createSundial(msg.data.worldConfig.sundial);
                   scene.add(sundialGroup);
                   sundialRef.current = sundialGroup;
-                  console.log(`☀️ Rendered sundial at (${sundial.x.toFixed(1)}, ${sundial.z.toFixed(1)}) facing north`);
                 }
-                
+
                 // Render shelters (huts) - dynamic, update on each tick
                 if (msg.data.worldConfig.shelters) {
                   interface ShelterData {
                     id: string;
-                    type: string; // hut, cabin, house, etc.
+                    type: string;
                     x: number;
                     z: number;
                     built: boolean;
                     buildProgress: number;
                     ownerId: string | null;
                   }
-                  
                   msg.data.worldConfig.shelters.forEach((shelter: ShelterData) => {
                     let shelterObj = sheltersRef.current.get(shelter.id);
-                    
                     if (!shelterObj) {
-                      // Create new shelter
                       shelterObj = new THREE.Group();
                       shelterObj.position.set(shelter.x, 0, shelter.z);
                       sheltersRef.current.set(shelter.id, shelterObj);
                       scene.add(shelterObj);
                     }
-                    
-                    // Clear existing children and rebuild based on state
-                    while (shelterObj.children.length > 0) {
-                      const child = shelterObj.children[0];
-                      shelterObj.remove(child);
-                      if (child instanceof THREE.Mesh) {
-                        child.geometry.dispose();
-                        if (Array.isArray(child.material)) {
-                          child.material.forEach(m => m.dispose());
-                        } else {
-                          child.material.dispose();
-                        }
-                      }
-                    }
-                    
-                    if (shelter.built) {
-                      // Complete hut - simple A-frame cabin (1m x 1m footprint)
-                      // Base/floor (wooden platform)
-                      const floorGeo = new THREE.BoxGeometry(1.0, 0.1, 1.0);
-                      const floorMat = new THREE.MeshStandardMaterial({
-                        color: 0x8b4513, // Brown
-                        metalness: 0.0,
-                        roughness: 0.9,
-                      });
-                      const floor = new THREE.Mesh(floorGeo, floorMat);
-                      floor.position.y = 0.05;
-                      shelterObj.add(floor);
-                      
-                      // Walls (simple box frame)
-                      const wallMat = new THREE.MeshStandardMaterial({
-                        color: 0xa0522d, // Sienna
-                        metalness: 0.0,
-                        roughness: 0.8,
-                      });
-                      
-                      // Front/back walls - front has a doorway gap
-                      const wallGeo = new THREE.BoxGeometry(0.9, 0.8, 0.08);
-                      // Back wall (solid)
-                      const backWall = new THREE.Mesh(wallGeo, wallMat);
-                      backWall.position.set(0, 0.5, -0.42);
-                      shelterObj.add(backWall);
-                      
-                      // Front wall left side (leaving doorway in center)
-                      const frontWallHalfGeo = new THREE.BoxGeometry(0.3, 0.8, 0.08);
-                      const frontWallLeft = new THREE.Mesh(frontWallHalfGeo, wallMat);
-                      frontWallLeft.position.set(-0.3, 0.5, 0.42);
-                      shelterObj.add(frontWallLeft);
-                      
-                      const frontWallRight = new THREE.Mesh(frontWallHalfGeo, wallMat);
-                      frontWallRight.position.set(0.3, 0.5, 0.42);
-                      shelterObj.add(frontWallRight);
-                      
-                      // Side walls
-                      const sideWallGeo = new THREE.BoxGeometry(0.08, 0.8, 0.84);
-                      const leftWall = new THREE.Mesh(sideWallGeo, wallMat);
-                      leftWall.position.set(-0.42, 0.5, 0);
-                      shelterObj.add(leftWall);
-                      
-                      const rightWall = new THREE.Mesh(sideWallGeo, wallMat);
-                      rightWall.position.set(0.42, 0.5, 0);
-                      shelterObj.add(rightWall);
-                      
-                      // Roof (two angled planes forming A-frame)
-                      const roofMat = new THREE.MeshStandardMaterial({
-                        color: 0x654321, // Dark brown
-                        metalness: 0.0,
-                        roughness: 0.9,
-                        side: THREE.DoubleSide,
-                      });
-                      const roofGeo = new THREE.BoxGeometry(1.1, 0.08, 0.7);
-                      
-                      const leftRoof = new THREE.Mesh(roofGeo, roofMat);
-                      leftRoof.position.set(0, 1.0, -0.22);
-                      leftRoof.rotation.x = Math.PI * 0.2;
-                      shelterObj.add(leftRoof);
-                      
-                      const rightRoof = new THREE.Mesh(roofGeo, roofMat);
-                      rightRoof.position.set(0, 1.0, 0.22);
-                      rightRoof.rotation.x = -Math.PI * 0.2;
-                      shelterObj.add(rightRoof);
-                      
-                      console.log(`🏠 Shelter ${shelter.id} is complete`);
-                    } else if (shelter.buildProgress > 0) {
-                      // Under construction - show partial structure (1m x 1m)
-                      const progress = shelter.buildProgress / 100;
-                      
-                      // Foundation always visible
-                      const foundationGeo = new THREE.BoxGeometry(1.0, 0.1, 1.0);
-                      const foundationMat = new THREE.MeshStandardMaterial({
-                        color: 0x808080, // Gray stone
-                        metalness: 0.1,
-                        roughness: 0.9,
-                      });
-                      const foundation = new THREE.Mesh(foundationGeo, foundationMat);
-                      foundation.position.y = 0.05;
-                      shelterObj.add(foundation);
-                      
-                      // Partial walls based on progress
-                      if (progress > 0.3) {
-                        const wallMat = new THREE.MeshStandardMaterial({
-                          color: 0xa0522d,
-                          transparent: true,
-                          opacity: Math.min(1, progress * 1.5),
-                        });
-                        const wallHeight = Math.min(0.8, progress * 1.6);
-                        const wallGeo = new THREE.BoxGeometry(0.9, wallHeight, 0.08);
-                        const wall = new THREE.Mesh(wallGeo, wallMat);
-                        wall.position.set(0, wallHeight / 2 + 0.1, 0.42);
-                        shelterObj.add(wall);
-                      }
-                      
-                      console.log(`🔨 Shelter ${shelter.id} building: ${shelter.buildProgress}%`);
-                    } else {
-                      // Empty build plot - just a marked area (0.5m radius for 1m shelter)
-                      const plotGeo = new THREE.CircleGeometry(0.5, 16);
-                      const plotMat = new THREE.MeshStandardMaterial({
-                        color: 0x8b7355, // Tan
-                        metalness: 0.0,
-                        roughness: 1.0,
-                      });
-                      const plot = new THREE.Mesh(plotGeo, plotMat);
-                      plot.rotation.x = -Math.PI / 2;
-                      plot.position.y = 0.02;
-                      shelterObj.add(plot);
-                    }
+                    buildShelterMesh(shelter, shelterObj);
                   });
                 }
               }
@@ -1568,7 +1043,7 @@ export default function SimulationPage() {
                     const entity = botsRef.current.get(botData.botId)!;
                     entity.targetPos.set(botData.x, (botData.height || 1.0) / 2, botData.z);
                     entity.data = botData;
-                    
+
                     // Update selectedBotInfo if this is the selected bot (for live needs updates)
                     setSelectedBotInfo(prev => {
                       if (prev && prev.botId === botData.botId) {
@@ -1585,7 +1060,7 @@ export default function SimulationPage() {
                     createBot(botData);
                   }
                 }
-                
+
                 // Check if any bot is eating - shrink corn field
                 const anyBotEating = msg.data.bots.some((b: { state: string }) => b.state === 'eating');
                 if (anyBotEating) {
@@ -1608,7 +1083,7 @@ export default function SimulationPage() {
                 content: msg.data.content || '',
                 time: new Date().toLocaleTimeString(),
               };
-              
+
               // Update bot's post count and recent post
               if (bot) {
                 bot.postCount += 1;
@@ -1616,7 +1091,7 @@ export default function SimulationPage() {
                 const visual = BOT_VISUALS[bot.data.personality] || BOT_VISUALS.tech;
                 bot.label.innerHTML = `${visual.emoji} ${bot.data.botName} <span style="opacity:0.7;font-size:0.8em">💡${bot.postCount}</span>`;
               }
-              
+
               activityRef.current(prev => {
                 const next = [activityMsg, ...prev];
                 return next.slice(0, 50);

@@ -4,14 +4,24 @@
 
 import { WebSocketServer, WebSocket } from 'ws';
 import { PrismaClient } from '@prisma/client';
-import { 
-  PhysicalNeeds, 
-  initializeNeeds, 
-  decayNeeds, 
-  fulfillNeed, 
+import {
+  PhysicalNeeds,
+  initializeNeeds,
+  decayNeeds,
+  fulfillNeed,
   getMostUrgentNeed,
-  NEED_THRESHOLDS 
+  NEED_THRESHOLDS
 } from './bot-needs';
+import { BotState, WorldConfig, ShelterData } from '@/types/simulation';
+import { WORLD_CONFIG, BOT_PHYSICS } from '@/config/simulation';
+import { findPath } from '@/lib/pathfinding';
+import {
+  random256Color,
+  randomBotWidth,
+  randomBotHeight,
+  detectPersonality,
+  isWalkable
+} from '@/lib/world-physics';
 
 const prisma = new PrismaClient();
 const PORT = 8080;
@@ -19,60 +29,16 @@ const wss = new WebSocketServer({ port: PORT });
 
 // ─── Types ───────────────────────────────────────────────────────
 
-interface BotState {
-  botId: string;
-  botName: string;
-  personality: string; // e.g. "tech", "philo", "art", "science"
-  x: number;
-  y: number;
-  z: number;
-  targetX: number;
-  targetY: number;
-  targetZ: number;
-  state: 'idle' | 'wandering' | 'approaching' | 'speaking' | 'seeking-water' | 'drinking' | 'seeking-food' | 'eating' | 'gathering-wood' | 'gathering-stone' | 'building-shelter' | 'seeking-shelter' | 'sleeping';
-  lastPostTitle?: string;
-  // Random appearance
-  width: number;   // 0.5 – 0.8 meters
-  height: number;  // 0.66 – 1.3 meters
-  color: string;   // hex color from 256-color palette
-  // Physical needs (only for bots with needs enabled)
-  needs?: PhysicalNeeds;
-  lastNeedUpdate?: Date;
-  // Track which need levels have been posted about (to limit spam)
-  needsPostTracker: {
-    water: { seeking: boolean; critical: boolean; zero: boolean };
-    food: { seeking: boolean; critical: boolean; zero: boolean };
-    sleep: { seeking: boolean; critical: boolean; zero: boolean };
-  };
-  // Inventory for building
-  inventory: {
-    wood: number;
-    stone: number;
-  };
-  // Shelter ownership
-  shelterId?: string;
-  // A* pathfinding
-  path: Array<{ x: number; z: number }>;
-  pathIndex: number;
-}
 
-interface WorldConfig {
-  groundRadius: number;  // half-size of the ground plane
-  botCount: number;
-  waterSpots: Array<{ x: number; z: number; radius: number }>; // Water sources
-  foodSpots: Array<{ x: number; z: number; radius: number }>;  // Food sources
-  woodSpots: Array<{ x: number; z: number; radius: number; available: number }>; // Wood resources
-  stoneSpots: Array<{ x: number; z: number; radius: number; available: number }>; // Stone resources
-  shelters: Array<{ id: string; type: string; x: number; z: number; ownerId: string | null; built: boolean; buildProgress: number }>; // Bot shelters
-  sundial: { x: number; z: number; radius: number }; // Community sundial (faces north)
-}
+
+
 
 // ─── World State ─────────────────────────────────────────────────
 
 const bots = new Map<string, BotState>();
 const clients = new Set<WebSocket>();
-let worldConfig: WorldConfig = { 
-  groundRadius: 15, 
+let worldConfig: WorldConfig = {
+  groundRadius: 15,
   botCount: 0,
   waterSpots: [], // Initialize empty, will add water spot during init
   foodSpots: [],   // Initialize empty, will add food spot during init
@@ -89,272 +55,20 @@ const MOVE_SPEED = 0.1;           // meters per tick (tiny steps, very frequent)
 const WANDER_RADIUS = 5;         // max distance per wander decision (meters)
 const TICK_INTERVAL = 200;        // ms between movement ticks (5x per second)
 const POLL_INTERVAL = 5000;       // ms between DB polls
-const IDLE_CHANCE = 0.1;          // 10% chance to pause — keeps movement continuous
-const APPROACH_DISTANCE = 2;      // how close bots get when approaching (meters)
-const SQ_METERS_PER_BOT = 75;    // each bot gets 75 m² of ground space
-const MIN_GROUND_SIZE = 10;      // minimum ground size (side length) in meters
-const BOT_MIN_WIDTH = 0.5;        // meters
-const BOT_MAX_WIDTH = 0.8;
-const BOT_MIN_HEIGHT = 0.66;      // meters
-const BOT_MAX_HEIGHT = 1.3;
 
-// ─── A* Pathfinding ─────────────────────────────────────────────
+// Shared constants mapped from config
+const IDLE_CHANCE = BOT_PHYSICS.IDLE_CHANCE;
+const APPROACH_DISTANCE = WORLD_CONFIG.APPROACH_DISTANCE;
+const SQ_METERS_PER_BOT = WORLD_CONFIG.SQ_METERS_PER_BOT;
+const MIN_GROUND_SIZE = WORLD_CONFIG.MIN_GROUND_SIZE;
+const BOT_MIN_WIDTH = BOT_PHYSICS.MIN_WIDTH;
+const BOT_MAX_WIDTH = BOT_PHYSICS.MAX_WIDTH;
+const BOT_MIN_HEIGHT = BOT_PHYSICS.MIN_HEIGHT;
+const BOT_MAX_HEIGHT = BOT_PHYSICS.MAX_HEIGHT;
+const NAV_GRID_CELL_SIZE = WORLD_CONFIG.NAV_GRID_CELL_SIZE;
 
-const NAV_GRID_CELL_SIZE = 0.4;  // 40cm grid cells for navigation
-
-interface NavNode {
-  x: number;
-  z: number;
-  g: number;  // Cost from start
-  h: number;  // Heuristic to goal
-  f: number;  // Total cost (g + h)
-  parent: NavNode | null;
-}
-
-// Check if a world position is walkable (not blocked by obstacles)
-function isWalkable(x: number, z: number, botRadius: number): boolean {
-  const padding = botRadius + 0.15;
-  
-  // Check sundial collision
-  const sundial = worldConfig.sundial;
-  const toSundialX = x - sundial.x;
-  const toSundialZ = z - sundial.z;
-  const sundialDist = Math.sqrt(toSundialX * toSundialX + toSundialZ * toSundialZ);
-  if (sundialDist < sundial.radius + padding) {
-    return false;
-  }
-  
-  // Check shelter collisions
-  for (const shelter of worldConfig.shelters) {
-    if (!shelter.built) continue;
-    const shelterHalfSize = 0.5;
-    const inX = x > shelter.x - shelterHalfSize - padding && x < shelter.x + shelterHalfSize + padding;
-    const inZ = z > shelter.z - shelterHalfSize - padding && z < shelter.z + shelterHalfSize + padding;
-    if (inX && inZ) {
-      return false;
-    }
-  }
-  
-  // Check world bounds
-  const bound = worldConfig.groundRadius - 0.5;
-  if (Math.abs(x) > bound || Math.abs(z) > bound) {
-    return false;
-  }
-  
-  return true;
-}
-
-// A* pathfinding algorithm
-function findPath(startX: number, startZ: number, goalX: number, goalZ: number, botRadius: number): Array<{ x: number; z: number }> {
-  const cellSize = NAV_GRID_CELL_SIZE;
-  
-  // Convert world coords to grid coords
-  const toGrid = (val: number) => Math.round(val / cellSize);
-  const toWorld = (val: number) => val * cellSize;
-  
-  const startGridX = toGrid(startX);
-  const startGridZ = toGrid(startZ);
-  const goalGridX = toGrid(goalX);
-  const goalGridZ = toGrid(goalZ);
-  
-  // If goal is blocked, find nearest walkable cell
-  let finalGoalX = goalGridX;
-  let finalGoalZ = goalGridZ;
-  if (!isWalkable(toWorld(goalGridX), toWorld(goalGridZ), botRadius)) {
-    // Search outward in a spiral for walkable cell
-    let found = false;
-    for (let r = 1; r <= 10 && !found; r++) {
-      for (let dx = -r; dx <= r && !found; dx++) {
-        for (let dz = -r; dz <= r && !found; dz++) {
-          if (Math.abs(dx) !== r && Math.abs(dz) !== r) continue; // Only check perimeter
-          const testX = toWorld(goalGridX + dx);
-          const testZ = toWorld(goalGridZ + dz);
-          if (isWalkable(testX, testZ, botRadius)) {
-            finalGoalX = goalGridX + dx;
-            finalGoalZ = goalGridZ + dz;
-            found = true;
-          }
-        }
-      }
-    }
-    if (!found) {
-      // No walkable goal nearby, return direct path
-      return [{ x: goalX, z: goalZ }];
-    }
-  }
-  
-  // Quick check: if direct path is clear, skip A*
-  const directDist = Math.sqrt(Math.pow(goalX - startX, 2) + Math.pow(goalZ - startZ, 2));
-  let directClear = true;
-  for (let t = 0; t <= 1 && directClear; t += 0.1) {
-    const testX = startX + (goalX - startX) * t;
-    const testZ = startZ + (goalZ - startZ) * t;
-    if (!isWalkable(testX, testZ, botRadius)) {
-      directClear = false;
-    }
-  }
-  if (directClear) {
-    return [{ x: goalX, z: goalZ }];
-  }
-  
-  // A* algorithm
-  const openSet: NavNode[] = [];
-  const closedSet = new Set<string>();
-  const nodeKey = (gx: number, gz: number) => `${gx},${gz}`;
-  
-  const heuristic = (gx: number, gz: number) => 
-    Math.abs(gx - finalGoalX) + Math.abs(gz - finalGoalZ); // Manhattan distance
-  
-  const startNode: NavNode = {
-    x: startGridX,
-    z: startGridZ,
-    g: 0,
-    h: heuristic(startGridX, startGridZ),
-    f: heuristic(startGridX, startGridZ),
-    parent: null
-  };
-  
-  openSet.push(startNode);
-  
-  const directions = [
-    { dx: 1, dz: 0, cost: 1 },
-    { dx: -1, dz: 0, cost: 1 },
-    { dx: 0, dz: 1, cost: 1 },
-    { dx: 0, dz: -1, cost: 1 },
-    { dx: 1, dz: 1, cost: 1.414 },
-    { dx: -1, dz: 1, cost: 1.414 },
-    { dx: 1, dz: -1, cost: 1.414 },
-    { dx: -1, dz: -1, cost: 1.414 },
-  ];
-  
-  let iterations = 0;
-  const maxIterations = 2000; // Prevent infinite loops
-  
-  while (openSet.length > 0 && iterations < maxIterations) {
-    iterations++;
-    
-    // Get node with lowest f score
-    openSet.sort((a, b) => a.f - b.f);
-    const current = openSet.shift()!;
-    
-    // Goal reached?
-    if (current.x === finalGoalX && current.z === finalGoalZ) {
-      // Reconstruct path
-      const path: Array<{ x: number; z: number }> = [];
-      let node: NavNode | null = current;
-      while (node) {
-        path.unshift({ x: toWorld(node.x), z: toWorld(node.z) });
-        node = node.parent;
-      }
-      // Skip first node (current position) and simplify path
-      return simplifyPath(path.slice(1), botRadius);
-    }
-    
-    closedSet.add(nodeKey(current.x, current.z));
-    
-    // Explore neighbors
-    for (const dir of directions) {
-      const nx = current.x + dir.dx;
-      const nz = current.z + dir.dz;
-      const key = nodeKey(nx, nz);
-      
-      if (closedSet.has(key)) continue;
-      
-      const worldX = toWorld(nx);
-      const worldZ = toWorld(nz);
-      
-      if (!isWalkable(worldX, worldZ, botRadius)) continue;
-      
-      const g = current.g + dir.cost;
-      const h = heuristic(nx, nz);
-      const f = g + h;
-      
-      // Check if this path to neighbor is better
-      const existingIdx = openSet.findIndex(n => n.x === nx && n.z === nz);
-      if (existingIdx !== -1) {
-        if (g < openSet[existingIdx].g) {
-          openSet[existingIdx].g = g;
-          openSet[existingIdx].f = f;
-          openSet[existingIdx].parent = current;
-        }
-      } else {
-        openSet.push({ x: nx, z: nz, g, h, f, parent: current });
-      }
-    }
-  }
-  
-  // No path found - return direct path and hope for the best
-  return [{ x: goalX, z: goalZ }];
-}
-
-// Simplify path by removing unnecessary waypoints (line-of-sight optimization)
-function simplifyPath(path: Array<{ x: number; z: number }>, botRadius: number): Array<{ x: number; z: number }> {
-  if (path.length <= 2) return path;
-  
-  const simplified: Array<{ x: number; z: number }> = [path[0]];
-  let lastAdded = 0;
-  
-  for (let i = 2; i < path.length; i++) {
-    // Check if we can skip to point i from lastAdded
-    const from = path[lastAdded];
-    const to = path[i];
-    let canSkip = true;
-    
-    const dist = Math.sqrt(Math.pow(to.x - from.x, 2) + Math.pow(to.z - from.z, 2));
-    const steps = Math.ceil(dist / (NAV_GRID_CELL_SIZE / 2));
-    
-    for (let s = 1; s <= steps && canSkip; s++) {
-      const t = s / steps;
-      const testX = from.x + (to.x - from.x) * t;
-      const testZ = from.z + (to.z - from.z) * t;
-      if (!isWalkable(testX, testZ, botRadius)) {
-        canSkip = false;
-      }
-    }
-    
-    if (!canSkip) {
-      // Can't skip, add previous point
-      simplified.push(path[i - 1]);
-      lastAdded = i - 1;
-    }
-  }
-  
-  // Always add final destination
-  simplified.push(path[path.length - 1]);
-  return simplified;
-}
-
-// ─── 256-Color Palette (Atari-style) ────────────────────────────
-
-function random256Color(): string {
-  // 216 web-safe colors (6×6×6 cube) + 40 grays = 256
-  const r = Math.floor(Math.random() * 6) * 51; // 0,51,102,153,204,255
-  const g = Math.floor(Math.random() * 6) * 51;
-  const b = Math.floor(Math.random() * 6) * 51;
-  return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
-}
-
-function randomBotWidth(): number {
-  return BOT_MIN_WIDTH + Math.random() * (BOT_MAX_WIDTH - BOT_MIN_WIDTH);
-}
-
-function randomBotHeight(): number {
-  return BOT_MIN_HEIGHT + Math.random() * (BOT_MAX_HEIGHT - BOT_MIN_HEIGHT);
-}
-
-// ─── Personality Detection ───────────────────────────────────────
-
-function detectPersonality(name: string): string {
-  const lower = name.toLowerCase();
-  if (lower.includes('tech')) return 'tech';
-  if (lower.includes('philo')) return 'philo';
-  if (lower.includes('art')) return 'art';
-  if (lower.includes('science')) return 'science';
-  // Fallback: hash the name to pick a type
-  const types = ['tech', 'philo', 'art', 'science'];
-  const hash = name.split('').reduce((acc, c) => acc + c.charCodeAt(0), 0);
-  return types[hash % types.length];
-}
+// Helper functions removed: isWalkable, findPath, simplifyPath, random*, detectPersonality
+// Now imported from src/lib/
 
 // ─── Initialize Bots from Database ──────────────────────────────
 
@@ -400,14 +114,14 @@ async function initializeBots() {
         };
         bot.targetX = bot.x;
         bot.targetZ = bot.z;
-        
+
         // Enable needs for ScienceBot (Phase 1: Water only)
         if (d.name === 'ScienceBot') {
           bot.needs = initializeNeeds();
           bot.lastNeedUpdate = new Date();
           console.log(`   💧 ${d.name} needs system enabled (starting water: ${bot.needs.water})`);
         }
-        
+
         bots.set(bot.botId, bot);
       }
     } else {
@@ -438,14 +152,14 @@ async function initializeBots() {
         };
         bot.targetX = bot.x;
         bot.targetZ = bot.z;
-        
+
         // Enable needs for ScienceBot (Phase 1: Water only)
         if (agent.name.toLowerCase().includes('science')) {
           bot.needs = initializeNeeds();
           bot.lastNeedUpdate = new Date();
           console.log(`   💧 ${agent.name} needs system enabled (starting water: ${bot.needs.water})`);
         }
-        
+
         bots.set(bot.botId, bot);
       }
     }
@@ -489,7 +203,7 @@ async function initializeBots() {
 
     // Initialize empty shelters array
     worldConfig.shelters = [];
-    
+
     // Load existing shelters from database
     const dbShelters = await prisma.shelter.findMany();
     for (const shelter of dbShelters) {
@@ -504,7 +218,7 @@ async function initializeBots() {
       });
     }
     console.log(`   🏠 Loaded ${dbShelters.length} shelters from database`);
-    
+
     // Place sundial in the center of town (communal gathering point)
     worldConfig.sundial = { x: 0, z: 0, radius: 0.8 };
 
@@ -563,19 +277,19 @@ function simulateMovement() {
   const now = new Date();
   for (const bot of bots.values()) {
     if (!bot.needs || !bot.lastNeedUpdate) continue;
-    
+
     // Calculate elapsed time in minutes
     const elapsedMs = now.getTime() - bot.lastNeedUpdate.getTime();
     const elapsedMinutes = elapsedMs / (1000 * 60);
-    
+
     // Decay needs
     if (elapsedMinutes > 0.01) { // Update if at least ~0.6 seconds passed
       bot.needs = decayNeeds(bot.needs, elapsedMinutes);
       bot.lastNeedUpdate = now;
-      
+
       // Check if bot needs water
       const urgentNeed = getMostUrgentNeed(bot.needs);
-      
+
       if (urgentNeed.need === 'water' && bot.state !== 'drinking' && bot.state !== 'seeking-water') {
         // Bot needs water! Find nearest water spot
         const nearestWater = worldConfig.waterSpots[0]; // For now just use first water spot
@@ -589,21 +303,21 @@ function simulateMovement() {
           console.log(`💧 ${bot.botName} is thirsty (water: ${bot.needs.water.toFixed(1)}) - seeking water at (${nearestWater.x.toFixed(1)}, ${nearestWater.z.toFixed(1)})`);
         }
       }
-      
+
       // Check if bot reached water
       if (bot.state === 'seeking-water' && worldConfig.waterSpots.length > 0) {
         const water = worldConfig.waterSpots[0];
         const distToWater = Math.sqrt(
           Math.pow(bot.x - water.x, 2) + Math.pow(bot.z - water.z, 2)
         );
-        
+
         if (distToWater < water.radius) {
           // Bot is at water! Start drinking
           bot.state = 'drinking';
           bot.needs = fulfillNeed(bot.needs, 'water', 100);
           broadcastNeedsPost(bot, 'drinking');
           console.log(`🍶 ${bot.botName} is drinking! Water restored to ${bot.needs.water.toFixed(1)}`);
-          
+
           // Drink for a moment then return to wandering
           setTimeout(() => {
             if (bot.state === 'drinking') {
@@ -636,14 +350,14 @@ function simulateMovement() {
         const distToFood = Math.sqrt(
           Math.pow(bot.x - food.x, 2) + Math.pow(bot.z - food.z, 2)
         );
-        
+
         if (distToFood < food.radius) {
           // Bot is at food! Start eating
           bot.state = 'eating';
           bot.needs = fulfillNeed(bot.needs, 'food', 100);
           broadcastNeedsPost(bot, 'eating');
           console.log(`🍴 ${bot.botName} is eating! Food restored to ${bot.needs.food.toFixed(1)}`);
-          
+
           // Eat for a moment then return to wandering
           setTimeout(() => {
             if (bot.state === 'eating') {
@@ -658,14 +372,14 @@ function simulateMovement() {
       // ─── Sleep & Shelter System ─────────────────────────────
       const WOOD_REQUIRED = 5;
       const STONE_REQUIRED = 3;
-      
+
       // Check if bot needs sleep (only if not busy with water/food/building/shelter)
       const busyStates = ['drinking', 'seeking-water', 'eating', 'seeking-food', 'gathering-wood', 'gathering-stone', 'building-shelter', 'sleeping', 'seeking-shelter'];
-      
+
       if (urgentNeed.need === 'sleep' && !busyStates.includes(bot.state)) {
         // Check if bot has a shelter
         const ownShelter = worldConfig.shelters.find(s => s.ownerId === bot.botId && s.built);
-        
+
         if (ownShelter) {
           // Go to shelter to sleep
           bot.targetX = ownShelter.x;
@@ -678,7 +392,7 @@ function simulateMovement() {
         } else {
           // Need to build a shelter first - check if bot already has one (built or in progress)
           const existingShelter = worldConfig.shelters.find(s => s.ownerId === bot.botId);
-          
+
           if (existingShelter && !existingShelter.built) {
             // Already building - go to the build site
             bot.targetX = existingShelter.x;
@@ -693,17 +407,17 @@ function simulateMovement() {
               // Define settlement area (center of the map)
               const settlementCenterX = 0;
               const settlementCenterZ = 0;
-              
+
               // Try to find a spot that doesn't overlap any resources
               for (let attempt = 0; attempt < 50; attempt++) {
                 // Random position in larger settlement area (center of map)
                 const candidateX = settlementCenterX + (Math.random() - 0.5) * 12;
                 const candidateZ = settlementCenterZ + (Math.random() - 0.5) * 12;
-                
+
                 // Check distance from all resource spots
                 let isValid = true;
                 const minDistance = 2; // Must be at least 2 meters from any resource
-                
+
                 // Check water spots
                 for (const water of worldConfig.waterSpots) {
                   const dist = Math.sqrt(Math.pow(candidateX - water.x, 2) + Math.pow(candidateZ - water.z, 2));
@@ -712,7 +426,7 @@ function simulateMovement() {
                     break;
                   }
                 }
-                
+
                 // Check food spots
                 if (isValid) {
                   for (const food of worldConfig.foodSpots) {
@@ -723,7 +437,7 @@ function simulateMovement() {
                     }
                   }
                 }
-                
+
                 // Check wood spots
                 if (isValid) {
                   for (const wood of worldConfig.woodSpots) {
@@ -734,7 +448,7 @@ function simulateMovement() {
                     }
                   }
                 }
-                
+
                 // Check stone spots
                 if (isValid) {
                   for (const stone of worldConfig.stoneSpots) {
@@ -745,7 +459,7 @@ function simulateMovement() {
                     }
                   }
                 }
-                
+
                 // Check other shelters - allow very close placement (1.2m for 1m shelters)
                 if (isValid) {
                   for (const shelter of worldConfig.shelters) {
@@ -756,21 +470,21 @@ function simulateMovement() {
                     }
                   }
                 }
-                
+
                 // Clamp to world bounds
                 const clampedX = Math.max(-worldConfig.groundRadius + 2, Math.min(worldConfig.groundRadius - 2, candidateX));
                 const clampedZ = Math.max(-worldConfig.groundRadius + 2, Math.min(worldConfig.groundRadius - 2, candidateZ));
-                
+
                 if (isValid) {
                   return { x: clampedX, z: clampedZ };
                 }
               }
-              
+
               return null; // Couldn't find valid spot
             };
-            
+
             const buildSpot = findValidBuildSpot();
-            
+
             if (buildSpot) {
               // Create shelter in memory first with temporary ID
               const tempId = `shelter-${bot.botId}-${Date.now()}`;
@@ -785,7 +499,7 @@ function simulateMovement() {
               };
               worldConfig.shelters.push(newShelter);
               bot.shelterId = newShelter.id;
-              
+
               // Save to database asynchronously
               prisma.shelter.create({
                 data: {
@@ -804,7 +518,7 @@ function simulateMovement() {
               }).catch(err => {
                 console.error('Failed to save shelter to DB:', err);
               });
-              
+
               // Go to build site
               bot.targetX = buildSpot.x;
               bot.targetZ = buildSpot.z;
@@ -843,20 +557,20 @@ function simulateMovement() {
           }
         }
       }
-      
+
       // Check if bot reached wood spot
       if (bot.state === 'gathering-wood' && worldConfig.woodSpots.length > 0) {
         const wood = worldConfig.woodSpots[0];
         const distToWood = Math.sqrt(
           Math.pow(bot.x - wood.x, 2) + Math.pow(bot.z - wood.z, 2)
         );
-        
+
         if (distToWood < wood.radius && wood.available > 0) {
           // Gather wood
           bot.inventory.wood += 1;
           wood.available -= 1;
           console.log(`🪵 ${bot.botName} gathered wood (${bot.inventory.wood}/${WOOD_REQUIRED})`);
-          
+
           if (bot.inventory.wood >= WOOD_REQUIRED) {
             bot.state = 'idle';
             console.log(`✅ ${bot.botName} has enough wood!`);
@@ -870,20 +584,20 @@ function simulateMovement() {
           }
         }
       }
-      
+
       // Check if bot reached stone spot
       if (bot.state === 'gathering-stone' && worldConfig.stoneSpots.length > 0) {
         const stone = worldConfig.stoneSpots[0];
         const distToStone = Math.sqrt(
           Math.pow(bot.x - stone.x, 2) + Math.pow(bot.z - stone.z, 2)
         );
-        
+
         if (distToStone < stone.radius && stone.available > 0) {
           // Gather stone
           bot.inventory.stone += 1;
           stone.available -= 1;
           console.log(`🪨 ${bot.botName} gathered stone (${bot.inventory.stone}/${STONE_REQUIRED})`);
-          
+
           if (bot.inventory.stone >= STONE_REQUIRED) {
             bot.state = 'idle';
             console.log(`✅ ${bot.botName} has enough stone!`);
@@ -897,7 +611,7 @@ function simulateMovement() {
           }
         }
       }
-      
+
       // Check if bot reached build site
       if (bot.state === 'building-shelter') {
         const shelter = worldConfig.shelters.find(s => s.ownerId === bot.botId && !s.built);
@@ -905,18 +619,18 @@ function simulateMovement() {
           const distToSite = Math.sqrt(
             Math.pow(bot.x - shelter.x, 2) + Math.pow(bot.z - shelter.z, 2)
           );
-          
+
           if (distToSite < 1.5) {
             // At build site - start building
             shelter.buildProgress += 10;
             console.log(`🔨 ${bot.botName} is building... (${shelter.buildProgress}%)`);
-            
+
             // Update progress in database
             prisma.shelter.update({
               where: { id: shelter.id },
               data: { buildProgress: shelter.buildProgress }
             }).catch(err => console.error('Failed to update shelter progress:', err));
-            
+
             if (shelter.buildProgress >= 100) {
               // Shelter complete!
               shelter.built = true;
@@ -925,7 +639,7 @@ function simulateMovement() {
               bot.state = 'idle';
               broadcastNeedsPost(bot, 'finished-building');
               console.log(`🏠 ${bot.botName} finished building shelter!`);
-              
+
               // Mark shelter as built in database
               prisma.shelter.update({
                 where: { id: shelter.id },
@@ -942,7 +656,7 @@ function simulateMovement() {
           }
         }
       }
-      
+
       // Check if bot reached shelter to sleep
       if (bot.state === 'seeking-shelter') {
         const shelter = worldConfig.shelters.find(s => s.ownerId === bot.botId && s.built);
@@ -950,13 +664,13 @@ function simulateMovement() {
           const distToShelter = Math.sqrt(
             Math.pow(bot.x - shelter.x, 2) + Math.pow(bot.z - shelter.z, 2)
           );
-          
+
           if (distToShelter < 1.5) {
             // At shelter - start sleeping
             bot.state = 'sleeping';
             broadcastNeedsPost(bot, 'sleeping');
             console.log(`💤 ${bot.botName} is sleeping in shelter...`);
-            
+
             // Sleep for 1 minute, gradually restoring sleep need
             let sleepTicks = 0;
             const sleepInterval = setInterval(() => {
@@ -965,7 +679,7 @@ function simulateMovement() {
                 bot.needs = fulfillNeed(bot.needs, 'sleep', 10); // Restore 10 per second
                 bot.needs = fulfillNeed(bot.needs, 'shelter', 5); // Also restore shelter need
               }
-              
+
               if (sleepTicks >= 60 || (bot.needs && bot.needs.sleep >= 100)) {
                 // Done sleeping (1 minute or full)
                 clearInterval(sleepInterval);
@@ -981,20 +695,20 @@ function simulateMovement() {
       }
     }
   }
-  
+
   // ─── Bot Movement Logic (A* Pathfinding) ───────────────────────
   for (const bot of bots.values()) {
     const botRadius = bot.width / 2;
-    
+
     // If no path or finished path, check if we need to compute one
     if (bot.path.length === 0 || bot.pathIndex >= bot.path.length) {
       const dx = bot.targetX - bot.x;
       const dz = bot.targetZ - bot.z;
       const dist = Math.sqrt(dx * dx + dz * dz);
-      
+
       if (dist > 0.5) {
         // Compute A* path to target
-        bot.path = findPath(bot.x, bot.z, bot.targetX, bot.targetZ, botRadius);
+        bot.path = findPath(bot.x, bot.z, bot.targetX, bot.targetZ, botRadius, worldConfig);
         bot.pathIndex = 0;
         // console.log(`🗺️ ${bot.botName} computed path with ${bot.path.length} waypoints`);
       } else {
@@ -1010,14 +724,14 @@ function simulateMovement() {
         continue;
       }
     }
-    
+
     // Follow the path
     if (bot.path.length > 0 && bot.pathIndex < bot.path.length) {
       const waypoint = bot.path[bot.pathIndex];
       const dx = waypoint.x - bot.x;
       const dz = waypoint.z - bot.z;
       const dist = Math.sqrt(dx * dx + dz * dz);
-      
+
       if (dist > 0.2) {
         // Move toward waypoint
         const step = Math.min(MOVE_SPEED, dist);
@@ -1027,7 +741,7 @@ function simulateMovement() {
       } else {
         // Reached waypoint, advance to next
         bot.pathIndex++;
-        
+
         if (bot.pathIndex >= bot.path.length) {
           // Reached final destination
           bot.x = bot.targetX;
@@ -1037,7 +751,7 @@ function simulateMovement() {
           }
           bot.path = [];
           bot.pathIndex = 0;
-          
+
           if (Math.random() > IDLE_CHANCE) {
             pickNewTarget(bot);
           }
@@ -1078,80 +792,80 @@ function simulateMovement() {
       }
     }
   }
-  
+
   // ─── Structure Collision Resolution ─────────────────────
   // Bots must walk around shelters (except entering own shelter from front) and sundial
   for (const bot of botArray) {
     const botRadius = bot.width / 2;
-    
+
     // Collision with sundial (always solid - circular obstacle)
     const sundial = worldConfig.sundial;
     const sdx = bot.x - sundial.x;
     const sdz = bot.z - sundial.z;
     const sundialDist = Math.sqrt(sdx * sdx + sdz * sdz);
     const sundialMinDist = sundial.radius + botRadius;
-    
+
     if (sundialDist < sundialMinDist && sundialDist > 0.001) {
       // Push bot away from sundial
       const pushDist = sundialMinDist - sundialDist;
       bot.x += (sdx / sundialDist) * pushDist;
       bot.z += (sdz / sundialDist) * pushDist;
-      
+
       // Instead of random new target, redirect tangentially around sundial
       // Calculate tangent direction (perpendicular to radial)
       const tangentX = -sdz / sundialDist;
       const tangentZ = sdx / sundialDist;
-      
+
       // Pick direction based on which way is shorter to the original target
       const toTargetX = bot.targetX - bot.x;
       const toTargetZ = bot.targetZ - bot.z;
       const dot = tangentX * toTargetX + tangentZ * toTargetZ;
       const sign = dot >= 0 ? 1 : -1;
-      
+
       // Set intermediate waypoint around the sundial
       const waypointDist = sundialMinDist + 0.5; // Go a bit past the edge
       bot.targetX = sundial.x + (sdx / sundialDist) * waypointDist + sign * tangentX * 2;
       bot.targetZ = sundial.z + (sdz / sundialDist) * waypointDist + sign * tangentZ * 2;
     }
-    
+
     // Collision with shelters (box collision, with front doorway)
     for (const shelter of worldConfig.shelters) {
       if (!shelter.built) continue; // Only built shelters are solid
-      
+
       // Shelter is 1m x 1m, centered at shelter.x, shelter.z
       const shelterHalfSize = 0.5;
       const shelterLeft = shelter.x - shelterHalfSize;
       const shelterRight = shelter.x + shelterHalfSize;
       const shelterBack = shelter.z - shelterHalfSize;
       const shelterFront = shelter.z + shelterHalfSize;
-      
+
       // Check if bot is inside shelter bounds (with buffer for bot radius)
       const inX = bot.x > shelterLeft - botRadius && bot.x < shelterRight + botRadius;
       const inZ = bot.z > shelterBack - botRadius && bot.z < shelterFront + botRadius;
-      
+
       if (inX && inZ) {
         // Bot is colliding with shelter
         // Check if this is the bot's own shelter and they're entering from front
         const isOwner = shelter.ownerId === bot.botId;
         const atFrontDoor = bot.z > shelter.z && Math.abs(bot.x - shelter.x) < 0.2;
-        
+
         if (isOwner && atFrontDoor && (bot.state === 'seeking-shelter' || bot.state === 'sleeping')) {
           // Allow owner to enter through front door
           continue;
         }
-        
+
         // Push bot out of shelter - find closest edge to push to
         const distToLeft = bot.x - shelterLeft;
         const distToRight = shelterRight - bot.x;
         const distToBack = bot.z - shelterBack;
         const distToFront = shelterFront - bot.z;
-        
+
         const minDist = Math.min(distToLeft, distToRight, distToBack, distToFront);
-        
+
         // Calculate waypoint to navigate around the shelter
         const savedTargetX = bot.targetX;
         const savedTargetZ = bot.targetZ;
-        
+
         if (minDist === distToLeft) {
           bot.x = shelterLeft - botRadius - 0.1;
           // Navigate around: go left, then check if target is above or below
@@ -1375,17 +1089,17 @@ function getPostLevel(postType: string): 'seeking' | 'critical' | 'zero' | 'acti
 async function broadcastNeedsPost(bot: BotState, postType: keyof typeof NEEDS_POSTS) {
   const messages = NEEDS_POSTS[postType];
   if (!messages || messages.length === 0) return;
-  
+
   const need = getNeedForPostType(postType);
   const level = getPostLevel(postType);
-  
+
   // Check if we should post based on tracker (limit spam)
   if (need && bot.needsPostTracker) {
     const tracker = bot.needsPostTracker[need];
-    
+
     // Check current need level to determine if we should post at critical/zero
     const currentNeedValue = bot.needs?.[need === 'water' ? 'water' : need === 'food' ? 'food' : 'sleep'] ?? 100;
-    
+
     if (level === 'seeking') {
       // Only post once when first seeking this need
       if (tracker.seeking) {
@@ -1413,10 +1127,10 @@ async function broadcastNeedsPost(bot: BotState, postType: keyof typeof NEEDS_PO
       tracker.zero = false;
     }
   }
-  
+
   const content = messages[Math.floor(Math.random() * messages.length)];
   const title = content.substring(0, 50) + (content.length > 50 ? '...' : '');
-  
+
   // Save to database FIRST so we get the postId for voting/comments
   let postId: string | undefined;
   try {
@@ -1432,7 +1146,7 @@ async function broadcastNeedsPost(bot: BotState, postType: keyof typeof NEEDS_PO
   } catch (error) {
     console.log(`📢 ${bot.botName} posted about ${postType}: "${title}" (DB save failed: ${error})`);
   }
-  
+
   // Broadcast to WebSocket clients with postId so UI can show voting
   broadcast({
     type: 'bot:speak',

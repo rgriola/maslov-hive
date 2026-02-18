@@ -76,6 +76,8 @@ export interface BotData {
   inventory?: {
     wood: number;
     stone: number;
+    water?: number; // max 5
+    food?: number;  // max 3
   };
 }
 
@@ -126,8 +128,13 @@ export interface BotState {
   inventory: {
     wood: number;
     stone: number;
+    water: number; // max 5
+    food: number;  // max 3
   };
   shelterId?: string;
+  helpingTargetId?: string;
+  lastHelpPostTime?: number;
+  urgentNeed?: string; // Emoji to display above bot
   path: Array<{ x: number; z: number }>;
   pathIndex: number;
 }
@@ -213,6 +220,8 @@ export interface SelectedBotInfo {
   inventory?: {
     wood: number;
     stone: number;
+    water?: number;
+    food?: number;
   };
 }
 

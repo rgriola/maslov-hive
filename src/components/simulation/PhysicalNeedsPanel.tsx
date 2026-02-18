@@ -30,10 +30,10 @@ function getStatusMessage(need: string, value: number): string {
     food: { warning: '⚠️ Nutrition needed', ok: 'Energy level adequate', threshold: 25 },
     sleep: { warning: '⚠️ Rest required soon', ok: 'Rest level sufficient', threshold: 20 },
   };
-  
+
   const config = messages[need];
   if (!config) return '';
-  
+
   return value < config.threshold ? config.warning : config.ok;
 }
 
@@ -82,10 +82,10 @@ export function PhysicalNeedsPanel({
       }}
     >
       {/* Header */}
-      <div style={{ 
-        display: 'flex', 
-        justifyContent: 'space-between', 
-        alignItems: 'center', 
+      <div style={{
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
         marginBottom: '16px',
         paddingBottom: '12px',
         borderBottom: `1px solid ${uiTheme.borderColor}`,
@@ -158,6 +158,15 @@ export function PhysicalNeedsPanel({
         statusMessage={getStatusMessage('sleep', needs.sleep)}
       />
 
+      <NeedsMeterWithIcon
+        label="Social"
+        value={needs.reproduction}
+        icon="💞"
+        uiTheme={uiTheme}
+        yellowThreshold={20}
+        statusMessage={needs.reproduction < 20 ? '⚠️ Seeking connection' : 'Social needs met'}
+      />
+
       {/* Secondary Needs Grid */}
       <div style={{
         marginTop: '16px',
@@ -175,9 +184,32 @@ export function PhysicalNeedsPanel({
         </div>
       </div>
 
+      {/* Inventory Grid */}
+      {selectedBotInfo.inventory && (
+        <div style={{
+          marginTop: '16px',
+          paddingTop: '16px',
+          borderTop: `1px solid ${uiTheme.borderColor}`,
+        }}>
+          <div style={{ fontSize: '10px', color: uiTheme.textMuted, marginBottom: '12px', textTransform: 'uppercase' as const, letterSpacing: '1px' }}>
+            Resources
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+            <NeedsGridCard icon="🪵" label="Wood" value={selectedBotInfo.inventory.wood} uiTheme={uiTheme} suffix="" />
+            <NeedsGridCard icon="🪨" label="Stone" value={selectedBotInfo.inventory.stone} uiTheme={uiTheme} suffix="" />
+            {selectedBotInfo.inventory.water !== undefined && (
+              <NeedsGridCard icon="🍶" label="Water" value={selectedBotInfo.inventory.water} uiTheme={uiTheme} suffix="/5" />
+            )}
+            {selectedBotInfo.inventory.food !== undefined && (
+              <NeedsGridCard icon="🍱" label="Food" value={selectedBotInfo.inventory.food} uiTheme={uiTheme} suffix="/3" />
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Info Footer */}
-      <div style={{ 
-        fontSize: '9px', 
+      <div style={{
+        fontSize: '9px',
         color: uiTheme.textMuted,
         marginTop: '16px',
         paddingTop: '12px',

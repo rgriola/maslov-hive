@@ -6,7 +6,6 @@
 import type { UiTheme, SelectedBotInfo } from '@/types/simulation';
 import { ensureContrastRatio } from '@/utils/color';
 import { getPersonalityMeta } from '@/config/bot-visuals';
-import { NeedsMeter } from './NeedsMeter';
 
 export interface BotMetricsPanelProps {
   /** UI theme for day/night styling */
@@ -19,16 +18,7 @@ export interface BotMetricsPanelProps {
   onClose: () => void;
 }
 
-/** Labels for physical needs display */
-const NEED_LABELS: Record<string, string> = {
-  food: 'Food',
-  sleep: 'Sleep',
-  air: 'Air',
-  shelter: 'Shelter',
-  clothing: 'Clothing',
-  homeostasis: 'Health',
-  reproduction: 'Social',
-};
+
 
 /**
  * Bot metrics panel showing identity, stats, and physical needs for selected bot.
@@ -175,104 +165,6 @@ export function BotMetricsPanel({
         }}>
           <span style={{ opacity: 0.7 }}>Last active:</span>{' '}
           <span style={{ color: uiTheme.textSecondary, fontWeight: 500 }}>{selectedBotInfo.lastPostTime}</span>
-        </div>
-      )}
-
-      {/* Resources Inventory */}
-      {selectedBotInfo.inventory && (
-        <div style={{
-          padding: '12px',
-          background: 'rgba(255,255,255,0.03)',
-          borderRadius: '10px',
-          marginBottom: '12px',
-        }}>
-          <div style={{
-            color: uiTheme.textSecondary,
-            fontSize: '10px',
-            letterSpacing: '1px',
-            textTransform: 'uppercase' as const,
-            marginBottom: '10px',
-          }}>
-            🎒 Resources
-          </div>
-
-          <div style={{ display: 'flex', gap: '12px', justifyContent: 'center' }}>
-            {/* Wood */}
-            <div style={{
-              flex: 1,
-              background: 'rgba(139, 69, 19, 0.15)',
-              padding: '10px 8px',
-              borderRadius: '8px',
-              textAlign: 'center' as const,
-            }}>
-              <div style={{ fontSize: '20px', marginBottom: '4px' }}>🪵</div>
-              <div style={{ color: '#d4a574', fontSize: '18px', fontWeight: 700, marginBottom: '2px' }}>
-                {selectedBotInfo.inventory.wood}
-              </div>
-              <div style={{ color: uiTheme.textSecondary, fontSize: '9px', textTransform: 'uppercase' as const }}>
-                Wood
-              </div>
-            </div>
-
-            {/* Stone */}
-            <div style={{
-              flex: 1,
-              background: 'rgba(128, 128, 128, 0.15)',
-              padding: '10px 8px',
-              borderRadius: '8px',
-              textAlign: 'center' as const,
-            }}>
-              <div style={{ fontSize: '20px', marginBottom: '4px' }}>🪨</div>
-              <div style={{ color: '#a0a0a0', fontSize: '18px', fontWeight: 700, marginBottom: '2px' }}>
-                {selectedBotInfo.inventory.stone}
-              </div>
-              <div style={{ color: uiTheme.textSecondary, fontSize: '9px', textTransform: 'uppercase' as const }}>
-                Stone
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Physical Needs Meters */}
-      {selectedBotInfo.needs && (
-        <div style={{
-          padding: '12px',
-          background: 'rgba(255,255,255,0.03)',
-          borderRadius: '10px',
-          marginBottom: '12px',
-        }}>
-          <div style={{
-            color: uiTheme.textSecondary,
-            fontSize: '10px',
-            letterSpacing: '1px',
-            textTransform: 'uppercase' as const,
-            marginBottom: '10px',
-          }}>
-            💧 Physical Needs
-          </div>
-
-          {/* Water meter (always shown) */}
-          <NeedsMeter
-            label="Water"
-            value={selectedBotInfo.needs.water}
-            uiTheme={uiTheme}
-          />
-
-          {/* Other needs - only show if not 100% */}
-          {Object.entries(selectedBotInfo.needs)
-            .filter(([key]) => key !== 'water')
-            .map(([key, value]) => {
-              if (value >= 99) return null;
-              return (
-                <NeedsMeter
-                  key={key}
-                  label={NEED_LABELS[key] || key}
-                  value={value}
-                  uiTheme={uiTheme}
-                />
-              );
-            })}
         </div>
       )}
 

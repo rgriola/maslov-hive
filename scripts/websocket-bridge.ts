@@ -60,6 +60,8 @@ const MOVE_SPEED = 0.1;           // meters per tick (tiny steps, very frequent)
 const WANDER_RADIUS = 5;         // max distance per wander decision (meters)
 const TICK_INTERVAL = 200;        // ms between movement ticks (5x per second)
 const POLL_INTERVAL = 5000;       // ms between DB polls
+// Cooldowns to prevent spamming
+const sharingCooldowns = new Map<string, number>(); // key: "giver-receiver", value: timestamp
 
 // Shared constants mapped from config
 const IDLE_CHANCE = BOT_PHYSICS.IDLE_CHANCE;
@@ -150,7 +152,7 @@ async function initializeBots() {
           height: randomBotHeight(),
           color: random256Color(),
           shape: randomBotShape(),
-          inventory: { wood: 0, stone: 0 },
+          inventory: { wood: 0, stone: 0, water: 0, food: 0 },
           needsPostTracker: createNeedsTracker(),
           path: [],
           pathIndex: 0,
@@ -158,12 +160,10 @@ async function initializeBots() {
         bot.targetX = bot.x;
         bot.targetZ = bot.z;
 
-        // Enable needs for ScienceBot (Phase 1: Water only)
-        if (d.name === 'ScienceBot') {
-          bot.needs = initializeNeeds();
-          bot.lastNeedUpdate = new Date();
-          console.log(`   💧 ${d.name} needs system enabled (starting water: ${bot.needs.water})`);
-        }
+        // Enable needs for all demo bots
+        bot.needs = initializeNeeds();
+        bot.lastNeedUpdate = new Date();
+        console.log(`   💧 ${d.name} needs system enabled`);
 
         bots.set(bot.botId, bot);
       }
@@ -185,7 +185,7 @@ async function initializeBots() {
           height: randomBotHeight(),
           color: random256Color(),
           shape: randomBotShape(),
-          inventory: { wood: 0, stone: 0 },
+          inventory: { wood: 0, stone: 0, water: 0, food: 0 },
           needsPostTracker: createNeedsTracker(),
           path: [],
           pathIndex: 0,
@@ -193,12 +193,10 @@ async function initializeBots() {
         bot.targetX = bot.x;
         bot.targetZ = bot.z;
 
-        // Enable needs for ScienceBot (Phase 1: Water only)
-        if (agent.name.toLowerCase().includes('science')) {
-          bot.needs = initializeNeeds();
-          bot.lastNeedUpdate = new Date();
-          console.log(`   💧 ${agent.name} needs system enabled (starting water: ${bot.needs.water})`);
-        }
+        // Enable needs for all bots
+        bot.needs = initializeNeeds();
+        bot.lastNeedUpdate = new Date();
+        console.log(`   💧 ${agent.name} needs system enabled`);
 
         bots.set(bot.botId, bot);
       }
@@ -292,7 +290,7 @@ async function initializeBots() {
         height: randomBotHeight(),
         color: random256Color(),
         shape: randomBotShape(),
-        inventory: { wood: 0, stone: 0 },
+        inventory: { wood: 0, stone: 0, water: 0, food: 0 },
         needsPostTracker: createNeedsTracker(),
         path: [],
         pathIndex: 0,
@@ -351,17 +349,74 @@ function simulateMovement() {
       // Check if bot needs water
       const urgentNeed = getMostUrgentNeed(bot.needs);
 
-      if (urgentNeed.need === 'water' && bot.state !== 'drinking' && bot.state !== 'seeking-water') {
-        // Bot needs water! Find nearest water spot
-        const nearestWater = worldConfig.waterSpots[0]; // For now just use first water spot
-        if (nearestWater) {
-          bot.targetX = nearestWater.x;
-          bot.targetZ = nearestWater.z;
-          bot.path = []; // Clear path for A* recompute
-          bot.pathIndex = 0;
-          bot.state = 'seeking-water';
-          broadcastNeedsPost(bot, 'seeking-water');
-          console.log(`💧 ${bot.botName} is thirsty (water: ${bot.needs.water.toFixed(1)}) - seeking water at (${nearestWater.x.toFixed(1)}, ${nearestWater.z.toFixed(1)})`);
+      // ─── Critical Distress Alerts (20% Threshold) ─────────────
+      if (bot.needs.water < 20) broadcastNeedsPost(bot, 'critical-water');
+      if (bot.needs.food < 20) broadcastNeedsPost(bot, 'critical-food');
+      if (bot.needs.sleep < 20) broadcastNeedsPost(bot, 'critical-sleep');
+
+      // ─── Status & Busy Check ──────────────────────────────────
+      const isSelfInDistress = isInCriticalCondition(bot.needs);
+      const globalBusyStates = [
+        'drinking', 'eating', 'building-shelter', 'sleeping',
+        'seeking-to-help', 'seeking-partner', 'coupling'
+      ];
+
+      // ─── Hero System: Proactively seek out needy neighbors ───
+      // Only help if healthy, having inventory, and not already busy
+      const canHelp = !isSelfInDistress && (bot.inventory.water > 0 || bot.inventory.food > 0) && ['idle', 'thinking', 'walking', 'wandering'].includes(bot.state);
+
+      if (canHelp) {
+        for (const neighbor of bots.values()) {
+          if (neighbor.botId === bot.botId) continue;
+          if (neighbor.state === 'seeking-to-help' || neighbor.state === 'sleeping' || neighbor.state === 'coupling') continue;
+
+          const dist = Math.sqrt(Math.pow(bot.x - neighbor.x, 2) + Math.pow(bot.z - neighbor.z, 2));
+          // Search for neighbors who actually NEED help (water or food)
+          if (neighbor.needs && (neighbor.needs.water < 20 || neighbor.needs.food < 20)) {
+            const cooldownKey = `${bot.botId}-${neighbor.botId}-hero`;
+            const lastHeroAction = sharingCooldowns.get(cooldownKey) || 0;
+            const nowTime = Date.now();
+
+            if (nowTime - lastHeroAction > 30000) { // 30s hero cooldown
+              if (Math.random() < 0.5) { // 50% chance to be a hero
+                bot.state = 'seeking-to-help';
+                bot.helpingTargetId = neighbor.botId;
+                bot.targetX = neighbor.x;
+                bot.targetZ = neighbor.z;
+                bot.path = [];
+                bot.pathIndex = 0;
+                broadcastNeedsPost(bot, 'coming-to-help');
+                console.log(`🦸 ${bot.botName} is going to help ${neighbor.botName}!`);
+                sharingCooldowns.set(cooldownKey, nowTime + 60000); // Set success cooldown
+                break; // One mission at a time
+              } else {
+                sharingCooldowns.set(cooldownKey, nowTime);
+              }
+            }
+          }
+        }
+      }
+
+      // Check if bot needs water (only if not busy)
+      if (urgentNeed.need === 'water' && !globalBusyStates.includes(bot.state) && bot.state !== 'seeking-water') {
+        // Survival Check: Do we have water in inventory?
+        if (bot.needs.water < 20 && bot.inventory.water > 0) {
+          bot.inventory.water--;
+          bot.needs = fulfillNeed(bot.needs, 'water', 10); // Restore 10% per item
+          console.log(`🍶 ${bot.botName} drank from canteen! (Water: ${bot.needs.water.toFixed(1)}, Inv: ${bot.inventory.water})`);
+          // Don't seek water yet
+        } else {
+          // Bot needs water! Find nearest water spot
+          const nearestWater = worldConfig.waterSpots[0];
+          if (nearestWater) {
+            bot.targetX = nearestWater.x;
+            bot.targetZ = nearestWater.z;
+            bot.path = []; // Clear path for A* recompute
+            bot.pathIndex = 0;
+            bot.state = 'seeking-water';
+            broadcastNeedsPost(bot, 'seeking-water');
+            console.log(`💧 ${bot.botName} is thirsty (water: ${bot.needs.water.toFixed(1)}) - seeking water at (${nearestWater.x.toFixed(1)}, ${nearestWater.z.toFixed(1)})`);
+          }
         }
       }
 
@@ -379,37 +434,59 @@ function simulateMovement() {
           console.log(`🍶 ${bot.botName} is drinking! Hydrating over 20s...`);
 
           // Drink for 20 seconds, gradually restoring water
+          // Drink until needs full AND inventory full (or timeout)
           let drinkTicks = 0;
+          const maxTicks = 60;
           const drinkInterval = setInterval(() => {
             drinkTicks++;
             if (bot.needs) {
-              bot.needs = fulfillNeed(bot.needs, 'water', 5); // ~100 over 20s
+              if (bot.needs.water < 100) {
+                bot.needs = fulfillNeed(bot.needs, 'water', 5); // Restore needs first
+              } else if (bot.inventory.water < 5) {
+                // Needs full, fill inventory (1 item every 2s)
+                if (drinkTicks % 2 === 0) {
+                  bot.inventory.water++;
+                  console.log(`🍶 ${bot.botName} collected water +1 (Inv: ${bot.inventory.water})`);
+                }
+              }
             }
-            if (drinkTicks >= 20) {
+
+            const isNeedsFull = (bot.needs?.water || 0) >= 100;
+            const isInvFull = bot.inventory.water >= 5;
+
+            if ((isNeedsFull && isInvFull) || drinkTicks >= maxTicks) {
               clearInterval(drinkInterval);
               if (bot.state === 'drinking') {
-                if (bot.needs) bot.needs = fulfillNeed(bot.needs, 'water', 100); // top off
+                if (bot.needs) bot.needs = fulfillNeed(bot.needs, 'water', 100);
                 bot.state = 'idle';
                 broadcastNeedsPost(bot, 'finished-drinking');
-                console.log(`✅ ${bot.botName} finished drinking (water: ${bot.needs?.water.toFixed(1)})`);
+                console.log(`✅ ${bot.botName} finished drinking (Water: ${bot.needs?.water.toFixed(1)}, Inv: ${bot.inventory.water})`);
               }
             }
           }, 1000);
         }
       }
 
-      // Check if bot needs food (only if not already seeking water or drinking)
-      if (urgentNeed.need === 'food' && !['drinking', 'seeking-water', 'eating', 'seeking-food'].includes(bot.state)) {
-        // Bot needs food! Find nearest food spot
-        const nearestFood = worldConfig.foodSpots[0];
-        if (nearestFood) {
-          bot.targetX = nearestFood.x;
-          bot.targetZ = nearestFood.z;
-          bot.path = []; // Clear path for A* recompute
-          bot.pathIndex = 0;
-          bot.state = 'seeking-food';
-          broadcastNeedsPost(bot, 'seeking-food');
-          console.log(`🍎 ${bot.botName} is hungry (food: ${bot.needs.food.toFixed(1)}) - seeking food at (${nearestFood.x.toFixed(1)}, ${nearestFood.z.toFixed(1)})`);
+      // Check if bot needs food (only if not already busy)
+      if (urgentNeed.need === 'food' && !globalBusyStates.includes(bot.state) && bot.state !== 'seeking-food') {
+        // Survival Check: Do we have food in inventory?
+        if (bot.needs.food < 15 && bot.inventory.food > 0) {
+          bot.inventory.food--;
+          bot.needs = fulfillNeed(bot.needs, 'food', 10); // Restore 10% per item
+          console.log(`🍎 ${bot.botName} ate a snack! (Food: ${bot.needs.food.toFixed(1)}, Inv: ${bot.inventory.food})`);
+          // Don't seek food yet
+        } else {
+          // Bot needs food! Find nearest food spot
+          const nearestFood = worldConfig.foodSpots[0];
+          if (nearestFood) {
+            bot.targetX = nearestFood.x;
+            bot.targetZ = nearestFood.z;
+            bot.path = []; // Clear path for A* recompute
+            bot.pathIndex = 0;
+            bot.state = 'seeking-food';
+            broadcastNeedsPost(bot, 'seeking-food');
+            console.log(`🍎 ${bot.botName} is hungry (food: ${bot.needs.food.toFixed(1)}) - seeking food at (${nearestFood.x.toFixed(1)}, ${nearestFood.z.toFixed(1)})`);
+          }
         }
       }
 
@@ -427,19 +504,33 @@ function simulateMovement() {
           console.log(`🍴 ${bot.botName} is eating! Filling up over 20s...`);
 
           // Eat for 20 seconds, gradually restoring food
+          // Eat until needs full AND inventory full (or timeout)
           let eatTicks = 0;
+          const maxTicks = 60;
           const eatInterval = setInterval(() => {
             eatTicks++;
             if (bot.needs) {
-              bot.needs = fulfillNeed(bot.needs, 'food', 5); // ~100 over 20s
+              if (bot.needs.food < 100) {
+                bot.needs = fulfillNeed(bot.needs, 'food', 5);
+              } else if (bot.inventory.food < 3) {
+                // Needs full, fill inventory (1 item every 2s)
+                if (eatTicks % 2 === 0) {
+                  bot.inventory.food++;
+                  console.log(`🍎 ${bot.botName} collected food +1 (Inv: ${bot.inventory.food})`);
+                }
+              }
             }
-            if (eatTicks >= 20) {
+
+            const isNeedsFull = (bot.needs?.food || 0) >= 100;
+            const isInvFull = bot.inventory.food >= 3;
+
+            if ((isNeedsFull && isInvFull) || eatTicks >= maxTicks) {
               clearInterval(eatInterval);
               if (bot.state === 'eating') {
-                if (bot.needs) bot.needs = fulfillNeed(bot.needs, 'food', 100); // top off
+                if (bot.needs) bot.needs = fulfillNeed(bot.needs, 'food', 100);
                 bot.state = 'idle';
                 broadcastNeedsPost(bot, 'finished-eating');
-                console.log(`✅ ${bot.botName} finished eating (food: ${bot.needs?.food.toFixed(1)})`);
+                console.log(`✅ ${bot.botName} finished eating (Food: ${bot.needs?.food.toFixed(1)}, Inv: ${bot.inventory.food})`);
               }
             }
           }, 1000);
@@ -450,10 +541,8 @@ function simulateMovement() {
       const WOOD_REQUIRED = 5;
       const STONE_REQUIRED = 3;
 
-      // Check if bot needs sleep (only if not busy with water/food/building/shelter)
-      const busyStates = ['drinking', 'seeking-water', 'eating', 'seeking-food', 'gathering-wood', 'gathering-stone', 'building-shelter', 'sleeping', 'seeking-shelter'];
-
-      if (urgentNeed.need === 'sleep' && !busyStates.includes(bot.state)) {
+      // Check if bot needs sleep (only if not busy)
+      if (urgentNeed.need === 'sleep' && !globalBusyStates.includes(bot.state) && !['seeking-shelter', 'gathering-wood', 'gathering-stone'].includes(bot.state)) {
         // Check if bot has a shelter
         const ownShelter = worldConfig.shelters.find(s => s.ownerId === bot.botId && s.built);
 
@@ -548,9 +637,20 @@ function simulateMovement() {
                   }
                 }
 
+                // Check Sundial (Social Core) - must never build on it
+                if (isValid && worldConfig.sundial) {
+                  const distToSundial = Math.sqrt(
+                    Math.pow(candidateX - worldConfig.sundial.x, 2) +
+                    Math.pow(candidateZ - worldConfig.sundial.z, 2)
+                  );
+                  if (distToSundial < worldConfig.sundial.radius + 2.0) {
+                    isValid = false;
+                  }
+                }
+
                 // Clamp to world bounds
-                const clampedX = Math.max(-worldConfig.groundRadius + 2, Math.min(worldConfig.groundRadius - 2, candidateX));
-                const clampedZ = Math.max(-worldConfig.groundRadius + 2, Math.min(worldConfig.groundRadius - 2, candidateZ));
+                const clampedX = Math.max(-worldConfig.groundRadius + 0.5, Math.min(worldConfig.groundRadius - 0.5, candidateX));
+                const clampedZ = Math.max(-worldConfig.groundRadius + 0.5, Math.min(worldConfig.groundRadius - 0.5, candidateZ));
 
                 if (isValid) {
                   return { x: clampedX, z: clampedZ };
@@ -751,6 +851,12 @@ function simulateMovement() {
             // Sleep for 1 minute, gradually restoring sleep need
             let sleepTicks = 0;
             const sleepInterval = setInterval(() => {
+              // Airplane Rule & General State Guard: Stop sleeping if state changed
+              if (bot.state !== 'sleeping') {
+                clearInterval(sleepInterval);
+                return;
+              }
+
               sleepTicks++;
               if (bot.needs) {
                 bot.needs = fulfillNeed(bot.needs, 'sleep', 1.7); // ~100 over 60s
@@ -775,15 +881,27 @@ function simulateMovement() {
       }
 
       // ─── Reproduction: coupling behavior ────────────────────────
-      const reproStates = ['seeking-partner', 'coupling', 'sleeping', 'seeking-water', 'drinking', 'seeking-food', 'eating', 'seeking-shelter', 'gathering-wood', 'gathering-stone', 'building-shelter'];
-      if (bot.needs && bot.needs.reproduction < NEED_THRESHOLDS.reproduction && !reproStates.includes(bot.state)) {
-        // Find a nearby partner also below threshold (or below 30 for wider pool)
+      const reproStates = [
+        'seeking-partner', 'coupling', 'sleeping', 'seeking-water', 'drinking',
+        'seeking-food', 'eating', 'seeking-shelter', 'gathering-wood',
+        'gathering-stone', 'building-shelter', 'seeking-to-help'
+      ];
+
+      // Seeking companionship at 50% threshold
+      if (bot.needs && bot.needs.reproduction < 50 && !reproStates.includes(bot.state)) {
+        // Find a partner who "consents" (one of the bots must be at least 50% healthy)
         let partner: typeof bot | null = null;
         let minDist = Infinity;
+        let potentialPartnersCount = 0;
+
         for (const candidate of bots.values()) {
           if (candidate.botId === bot.botId) continue;
-          if (!candidate.needs || candidate.needs.reproduction > 30) continue;
+          potentialPartnersCount++;
+
+          // Relaxed Matching: Partner just needs to not be busy. 
+          // They don't have to be >50% healthy anymore (Mutual Benefit).
           if (reproStates.includes(candidate.state)) continue;
+
           const dist = Math.sqrt(Math.pow(bot.x - candidate.x, 2) + Math.pow(bot.z - candidate.z, 2));
           if (dist < minDist) {
             minDist = dist;
@@ -792,54 +910,124 @@ function simulateMovement() {
         }
 
         if (partner) {
-          // Both head toward midpoint
-          const midX = (bot.x + partner.x) / 2;
-          const midZ = (bot.z + partner.z) / 2;
-          bot.targetX = midX;
-          bot.targetZ = midZ;
+          // Lover's Corners (within 15m radius)
+          const corners = [
+            { x: 10, z: 10 },
+            { x: 10, z: -10 },
+            { x: -10, z: 10 },
+            { x: -10, z: -10 }
+          ];
+          const selectedCorner = corners[Math.floor(Math.random() * corners.length)];
+
+          bot.targetX = selectedCorner.x;
+          bot.targetZ = selectedCorner.z;
           bot.path = [];
           bot.pathIndex = 0;
           bot.state = 'seeking-partner';
           bot.partnerId = partner.botId;
-          partner.targetX = midX;
-          partner.targetZ = midZ;
+
+          partner.targetX = selectedCorner.x;
+          partner.targetZ = selectedCorner.z;
           partner.path = [];
           partner.pathIndex = 0;
           partner.state = 'seeking-partner';
           partner.partnerId = bot.botId;
+
           broadcastNeedsPost(bot, 'seeking-partner');
-          console.log(`💝 ${bot.botName} and ${partner.botName} are seeking each other (repro: ${bot.needs.reproduction.toFixed(0)}, ${partner.needs?.reproduction.toFixed(0)})`);
+          console.log(`💝 ${bot.botName} and ${partner.botName} matched! Heading to corner (${selectedCorner.x}, ${selectedCorner.z}) for a date.`);
+        } else if (potentialPartnersCount > 0 && Math.random() < 0.05) {
+          // Diagnostic log: Only log 5% of failures to avoid spam
+          console.log(`⚠️ Social Deadlock: ${bot.botName} is seeking connection but no healthy partners (>50%) are available.`);
         }
       }
 
-      // Check if seeking-partner bots have met
+      // Check if seeking-partner bots have met at the corner
       if (bot.state === 'seeking-partner' && bot.partnerId) {
         const partner = bots.get(bot.partnerId);
         if (partner) {
-          const dist = Math.sqrt(Math.pow(bot.x - partner.x, 2) + Math.pow(bot.z - partner.z, 2));
-          if (dist < 1.5) {
+          const distToPartner = Math.sqrt(Math.pow(bot.x - partner.x, 2) + Math.pow(bot.z - partner.z, 2));
+          const distToTarget = Math.sqrt(Math.pow(bot.x - bot.targetX, 2) + Math.pow(bot.z - bot.targetZ, 2));
+
+          // met when within 1.5m of each other AND near target corner
+          if (distToPartner < 1.5 && distToTarget < 2) {
             // Close enough — start coupling
             bot.state = 'coupling';
             partner.state = 'coupling';
-            broadcastNeedsPost(bot, 'coupling');
-            console.log(`💕 ${bot.botName} and ${partner.botName} are coupling...`);
 
-            // Couple for 8 seconds, then restore
+            // Set visuals
+            bot.urgentNeed = '💖';
+            partner.urgentNeed = '💖';
+
+            broadcastNeedsPost(bot, 'coupling');
+            console.log(`💕 ${bot.botName} and ${partner.botName} are coupling at the corner...`);
+
+            // Couple for 30 seconds (stationary)
             setTimeout(() => {
               if (bot.needs) bot.needs = fulfillNeed(bot.needs, 'reproduction', 100);
               if (partner.needs) partner.needs = fulfillNeed(partner.needs, 'reproduction', 100);
+
               if (bot.state === 'coupling') bot.state = 'idle';
               if (partner.state === 'coupling') partner.state = 'idle';
+
+              bot.urgentNeed = undefined;
+              partner.urgentNeed = undefined;
               bot.partnerId = undefined;
               partner.partnerId = undefined;
+
               broadcastNeedsPost(bot, 'finished-coupling');
-              console.log(`✨ ${bot.botName} and ${partner.botName} finished coupling — reproduction restored!`);
-            }, 8000);
+              console.log(`✨ ${bot.botName} and ${partner.botName} finished coupling — hearts everywhere! 💖✨`);
+            }, 30000);
           }
         } else {
           // Partner disappeared
           bot.state = 'idle';
           bot.partnerId = undefined;
+        }
+      }
+
+      // ─── Hero System: Seek and Help Behavior ──────────────────
+      if (bot.state === 'seeking-to-help' && bot.helpingTargetId) {
+        const neighbor = bots.get(bot.helpingTargetId);
+        if (!neighbor || !neighbor.needs) {
+          bot.state = 'idle';
+          bot.helpingTargetId = undefined;
+        } else {
+          // Airplane Rule: Abort if I become too needy while helping
+          if (isSelfInDistress) {
+            bot.state = 'idle';
+            bot.helpingTargetId = undefined;
+            console.log(`🚑 ${bot.botName} aborted rescue of ${neighbor.botName} due to own distress!`);
+          } else {
+            // Keep neighbor as moving target
+            bot.targetX = neighbor.x;
+            bot.targetZ = neighbor.z;
+
+            const dist = Math.sqrt(Math.pow(bot.x - neighbor.x, 2) + Math.pow(bot.z - neighbor.z, 2));
+            if (dist < 0.6) {
+              // Within range - deliver help!
+              let delivered = false;
+              if (bot.inventory.water > 0 && neighbor.needs.water < 30) {
+                bot.inventory.water--;
+                neighbor.needs = fulfillNeed(neighbor.needs, 'water', 40);
+                delivered = true;
+              } else if (bot.inventory.food > 0 && neighbor.needs.food < 30) {
+                bot.inventory.food--;
+                neighbor.needs = fulfillNeed(neighbor.needs, 'food', 40);
+                delivered = true;
+              }
+
+              if (delivered) {
+                broadcastNeedsPost(neighbor, 'thank-you');
+                bot.state = 'idle';
+                bot.helpingTargetId = undefined;
+                console.log(`🎁 ${bot.botName} successfully helped ${neighbor.botName}!`);
+              } else if (neighbor.needs.water >= 30 && neighbor.needs.food >= 30) {
+                // They were already helped or recovered
+                bot.state = 'idle';
+                bot.helpingTargetId = undefined;
+              }
+            }
+          }
         }
       }
 
@@ -1224,7 +1412,7 @@ function simulateMovement() {
 }
 
 function pickNewTarget(bot: BotState) {
-  const radius = worldConfig.groundRadius - 2; // Stay within bounds
+  const radius = worldConfig.groundRadius - 0.5; // Stay within bounds
 
   // 30% chance: approach another bot
   if (Math.random() < 0.3) {
@@ -1488,23 +1676,59 @@ const NEEDS_POSTS = {
     "Built my own home! This is a huge milestone. Can't wait to use it! 🛖🎉",
   ],
   'seeking-partner': [
-    "Feeling the urge to connect... looking for a companion nearby 💝",
-    "My social instincts are kicking in. Time to find a partner! 💕",
-    "Need to find someone special. The drive to connect is strong! 🥰",
+    "Feeling the urge to connect... looking for a special companion nearby 💖",
+    "My social instincts are kicking in. Time to find a partner! 💕✨",
+    "Looking for someone to share this moment with. Love is in the air! 💝",
   ],
   'coupling': [
-    "Found my partner! This moment of connection feels wonderful 💕✨",
-    "Together at last. The bond of companionship is fulfilling 🥰",
-    "A beautiful moment of togetherness. Life feels complete right now 💝",
+    "Found my partner! We're celebrating our connection at the corner 💖✨",
+    "Together at last. This bond is exactly what I needed 💕",
+    "A beautiful moment of togetherness. 💓 Life is better with friends!",
   ],
   'finished-coupling': [
-    "That was a meaningful connection! Feeling renewed and content 💝✅",
-    "Companionship need fulfilled. Back to exploring the world! ✨😊",
+    "That was such a meaningful connection! 💖 Feeling content and happy ✨",
+    "My heart is full! Back to exploring the world with new energy 💝😊",
+    "Grateful for the connection. Social needs fully restored! 🙏💖",
   ],
   'cold': [
     "Brrr! It's getting cold out here. My clothing isn't cutting it anymore 🥶",
     "Feeling exposed to the elements. Need to get to shelter for warmth! ❄️",
     "Temperature regulation failing... heading somewhere warm 🧥🏠",
+  ],
+  'sharing-water': [
+    "Here, take some water! Hydration is important 💧🤝",
+    "Sharing my water supply. We survive together! 🍶✨",
+    "Don't worry, I have extra water. Here you go! 💙",
+  ],
+  'sharing-food': [
+    "You look hungry! Have some of my food 🍎🤝",
+    "Sharing is caring! Here's a snack for you 🍱✨",
+    "I have extra food. Take this! We need to stay strong 💪",
+  ],
+  'critical-water': [
+    "I'm dangerously thirsty! 💧🆘 Help! My water is almost gone!",
+    "Searching desperately for water... I'm at a critical level! 😫💦",
+    "Water! I need water! 🆘 Can anyone help?",
+  ],
+  'critical-food': [
+    "I'm starving! 🍎🆘 My energy is dangerously low!",
+    "Critical hunger alert! 😫🍴 Need to find sustenance immediately!",
+    "I'm so hungry I'm starting to fail... Help! 🆘",
+  ],
+  'critical-sleep': [
+    "I'm collapsing from exhaustion! 😴🆘 Need to find a shelter now!",
+    "Critical sleep deprivation! 😫💤 I can barely move!",
+    "Emergency shelter needed! I'm about to power down... 🆘",
+  ],
+  'coming-to-help': [
+    "Hang in there, I'm coming with help! 🏃‍♂️🤝",
+    "I see you're in distress! I'm on my way with supplies! 📦🏃‍♂️",
+    "Don't give up! I'm bringing what you need right now! ✨🤝",
+  ],
+  'thank-you': [
+    "Thank you! You're a lifesaver! 🙏✨",
+    "I was in real trouble... thank you so much for the help! 💖😇",
+    "You're a true friend! That was exactly what I needed. 🙏✨",
   ],
 };
 
@@ -1512,7 +1736,7 @@ const NEEDS_POSTS = {
 function getNeedForPostType(postType: string): 'water' | 'food' | 'sleep' | 'air' | 'clothing' | 'homeostasis' | 'reproduction' | null {
   if (postType.includes('water') || postType.includes('drinking')) return 'water';
   if (postType.includes('food') || postType.includes('eating')) return 'food';
-  if (postType.includes('shelter') || postType.includes('sleeping') || postType.includes('wood') || postType.includes('stone') || postType.includes('building')) return 'sleep';
+  if (postType.includes('shelter') || postType.includes('sleeping') || postType.includes('wood') || postType.includes('stone') || postType.includes('building') || postType.includes('sleep')) return 'sleep';
   if (postType.includes('partner') || postType.includes('coupling')) return 'reproduction';
   if (postType.includes('cold') || postType.includes('clothing')) return 'clothing';
   return null;
@@ -1521,6 +1745,7 @@ function getNeedForPostType(postType: string): 'water' | 'food' | 'sleep' | 'air
 // Helper to determine which level a post type represents
 function getPostLevel(postType: string): 'seeking' | 'critical' | 'zero' | 'activity' | 'finished' {
   if (postType.startsWith('seeking-') || postType.startsWith('gathering-')) return 'seeking';
+  if (postType.startsWith('critical-')) return 'critical';
   if (postType.startsWith('finished-')) return 'finished';
   // Activity posts (drinking, eating, sleeping, building) - single post per cycle
   return 'activity';
@@ -1547,6 +1772,13 @@ async function broadcastNeedsPost(bot: BotState, postType: keyof typeof NEEDS_PO
         return;
       }
       tracker.seeking = true;
+    } else if (level === 'critical') {
+      // Critical alerts: only post once per cycle
+      if (tracker.critical) {
+        console.log(`🔇 ${bot.botName} skipping ${postType} - already posted critical alert`);
+        return;
+      }
+      tracker.critical = true;
     } else if (level === 'activity') {
       // Activity posts: also check critical (≤10%) and zero (≤0%) thresholds
       if (currentNeedValue <= 0 && !tracker.zero) {
@@ -1612,9 +1844,10 @@ function broadcast(message: any) {
 }
 
 function computeBotExtras(bot: BotState, allBots: Map<string, BotState>) {
-  // Urgent need emoji
-  let urgentNeed: string | undefined;
-  if (bot.needs) {
+  // Urgent need emoji - honor manual override first
+  let urgentNeed = bot.urgentNeed;
+
+  if (!urgentNeed && bot.needs) {
     const urgent = getMostUrgentNeed(bot.needs);
     if (urgent.need) {
       urgentNeed = getNeedEmoji(urgent.need);
@@ -1629,8 +1862,8 @@ function computeBotExtras(bot: BotState, allBots: Map<string, BotState>) {
     const dz = bot.z - other.z;
     const dist = Math.sqrt(dx * dx + dz * dz);
     if (dist <= 2.0) {
-      let otherUrgent: string | undefined;
-      if (other.needs) {
+      let otherUrgent = other.urgentNeed;
+      if (!otherUrgent && other.needs) {
         const u = getMostUrgentNeed(other.needs);
         if (u.need) otherUrgent = getNeedEmoji(u.need);
       }

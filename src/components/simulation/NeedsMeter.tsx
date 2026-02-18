@@ -178,19 +178,21 @@ export interface NeedsGridCardProps {
   icon: string;
   /** Label text */
   label: string;
-  /** Current value (0-100) */
+  /** Current value */
   value: number;
   /** UI theme for colors */
   uiTheme: UiTheme;
+  /** Value suffix (default: "%") */
+  suffix?: string;
 }
 
 /**
  * Compact grid card for secondary needs display
  */
-export function NeedsGridCard({ icon, label, value, uiTheme }: NeedsGridCardProps) {
+export function NeedsGridCard({ icon, label, value, uiTheme, suffix = '%' }: NeedsGridCardProps) {
   return (
     <div style={{
-      background: 'rgba(255,255,255,0.05)',
+      background: uiTheme.cardBg,
       padding: '10px',
       borderRadius: '8px',
       border: `1px solid ${uiTheme.borderColor}`,
@@ -198,7 +200,7 @@ export function NeedsGridCard({ icon, label, value, uiTheme }: NeedsGridCardProp
       <div style={{ fontSize: '20px', marginBottom: '4px' }}>{icon}</div>
       <div style={{ fontSize: '10px', color: uiTheme.textMuted, marginBottom: '2px' }}>{label}</div>
       <div style={{ fontSize: '16px', color: uiTheme.textPrimary, fontWeight: 700 }}>
-        {Math.round(value)}%
+        {Math.round(value)}{suffix}
       </div>
     </div>
   );

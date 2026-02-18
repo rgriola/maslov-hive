@@ -41,15 +41,15 @@ export const NEED_THRESHOLDS = {
   shelter: 15,
   clothing: 15,
   homeostasis: 20,
-  reproduction: 10, // Less urgent
+  reproduction: 50, // Higher threshold for more active social life
 };
 
 // Critical thresholds (bot is in distress)
 export const CRITICAL_THRESHOLDS = {
   air: 15,
-  water: 10,
-  food: 10,
-  sleep: 5,
+  water: 20,
+  food: 20,
+  sleep: 20,
   clothing: 10,
   homeostasis: 10,
   reproduction: 5,

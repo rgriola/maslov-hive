@@ -253,7 +253,8 @@ export default function SimulationPage() {
     const dayFactor = Math.max(0, Math.min(1, (altitude + 0.15) / (Math.PI / 2 + 0.15)));
 
     // Panel colors transition from dark (night) to light (day)
-    const panelBg = `rgba(${Math.round(10 + dayFactor * 230)}, ${Math.round(10 + dayFactor * 230)}, ${Math.round(26 + dayFactor * 220)}, ${0.95 - dayFactor * 0.15})`;
+    // Kept alpha high (0.95) to ensure 4.5:1 contrast regardless of 3D scene background
+    const panelBg = `rgba(${Math.round(10 + dayFactor * 230)}, ${Math.round(10 + dayFactor * 230)}, ${Math.round(26 + dayFactor * 220)}, 0.95)`;
     const panelBgHex = rgbToHex(
       Math.round(10 + dayFactor * 230),
       Math.round(10 + dayFactor * 230),
@@ -262,11 +263,11 @@ export default function SimulationPage() {
     const borderColor = `rgba(${Math.round(74 + dayFactor * 100)}, ${Math.round(158 + dayFactor * 50)}, ${Math.round(255 - dayFactor * 50)}, ${0.15 + dayFactor * 0.2})`;
 
     // WCAG AA compliant text colors for both day and night modes
-    const textPrimary = dayFactor > 0.5 ? '#1a1a1a' : '#ffffff';
-    const textSecondary = dayFactor > 0.5 ? '#3a3a3a' : '#c9d1d9';  // 7.5:1 on dark, 10.5:1 on light
-    const textMuted = dayFactor > 0.5 ? '#5a5a5a' : '#8b949e';      // 4.6:1 on dark, 6.4:1 on light
+    const textPrimary = dayFactor > 0.5 ? '#111111' : '#ffffff';     // Darker black for day
+    const textSecondary = dayFactor > 0.5 ? '#333333' : '#c9d1d9';   // Darker gray for day
+    const textMuted = dayFactor > 0.5 ? '#555555' : '#9ca3af';       // Darker mute for day, lighter for night
 
-    const cardBg = dayFactor > 0.5 ? 'rgba(0,0,0,0.05)' : 'rgba(255,255,255,0.05)';
+    const cardBg = dayFactor > 0.5 ? 'rgba(0,0,0,0.06)' : 'rgba(255,255,255,0.08)'; // Slightly more visible cards
     const cardBgHover = dayFactor > 0.5 ? 'rgba(74,158,255,0.15)' : 'rgba(74,158,255,0.12)';
 
     return { panelBg, panelBgHex, borderColor, textPrimary, textSecondary, textMuted, cardBg, cardBgHover, dayFactor };

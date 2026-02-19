@@ -1226,6 +1226,22 @@ export default function SimulationPage() {
               }
 
               activityRef.current(prev => {
+                // Deduplicate: check if we already have this post or comment
+                const isDuplicate = prev.some(item => {
+                  if (activityMsg.commentId && item.commentId) {
+                    return item.commentId === activityMsg.commentId;
+                  }
+                  if (activityMsg.postId && item.postId && !activityMsg.commentId && !item.commentId) {
+                    return item.postId === activityMsg.postId;
+                  }
+                  return false;
+                });
+
+                if (isDuplicate) {
+                  console.log(`[ActivityFeed] Skipping duplicate message: ${activityMsg.text.substring(0, 30)}...`);
+                  return prev;
+                }
+
                 const next = [activityMsg, ...prev];
                 return next.slice(0, 50);
               });

@@ -101,7 +101,7 @@ export function DraggablePanel({
     }, [isDragging, pos, id]);
 
     // Avoid Hydration mismatch
-    if (!mounted) return <div style={{ visibility: 'hidden' }}>{children}</div>;
+    if (!mounted) return null;
 
     const style: React.CSSProperties = {
         position: 'absolute',

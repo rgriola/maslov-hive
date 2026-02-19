@@ -331,29 +331,34 @@ export async function broadcastNeedsPost(
 
     if (level === 'seeking') {
       if (tracker.seeking) {
-        console.log(`🔇 ${bot.botName} skipping ${postType} - already posted seeking`);
         return;
       }
       tracker.seeking = true;
     } else if (level === 'critical') {
       if (tracker.critical) {
-        console.log(`🔇 ${bot.botName} skipping ${postType} - already posted critical alert`);
         return;
       }
       tracker.critical = true;
     } else if (level === 'activity') {
+      // Add a cooldown for generic activity posts (e.g. "cold", "drinking")
+      // Only post every 30 seconds for the same activity
+      const now = Date.now();
+      const lastTime = (tracker as any).lastActivityTime || 0;
+      if (now - lastTime < 30000) {
+        return;
+      }
+      (tracker as any).lastActivityTime = now;
+
       if (currentNeedValue <= 0 && !tracker.zero) {
         tracker.zero = true;
       } else if (currentNeedValue <= 10 && !tracker.critical) {
         tracker.critical = true;
-      } else if (tracker.seeking) {
-        console.log(`🔇 ${bot.botName} skipping ${postType} - already in activity cycle`);
-        return;
       }
     } else if (level === 'finished') {
       tracker.seeking = false;
       tracker.critical = false;
       tracker.zero = false;
+      (tracker as any).lastActivityTime = 0;
     }
   }
 
@@ -361,6 +366,8 @@ export async function broadcastNeedsPost(
   if (targetName) {
     content = content.replace(/{name}/g, `@${targetName}`);
   }
+
+  // Clean up title: remove emojis for the title part if needed, but keep it simple
   const title = content.substring(0, 50) + (content.length > 50 ? '...' : '');
 
   // Save to database

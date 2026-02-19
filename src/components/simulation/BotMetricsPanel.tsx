@@ -41,19 +41,16 @@ export function BotMetricsPanel({
   return (
     <div
       style={{
-        position: 'absolute',
-        top: '115px',
-        left: showFeed ? '288px' : '8px',
+        position: 'relative',
         width: 'min(240px, calc(100vw - 24px))', // Responsive
         background: uiTheme.panelBg,
         border: `1px solid ${uiTheme.borderColor}`,
         borderRadius: '12px',
-        zIndex: 15,
         fontFamily: "'Inter', system-ui, sans-serif",
         backdropFilter: 'blur(10px)',
         padding: '14px 16px',
         boxShadow: '0 4px 20px rgba(0,0,0,0.3)',
-        transition: 'left 0.3s, background 0.5s, border-color 0.5s',
+        transition: 'background 0.5s, border-color 0.5s',
         maxHeight: 'calc(100vh - 130px)',
         overflowY: 'auto',
       }}

@@ -31,10 +31,7 @@ export const AllBotsPanel: React.FC<AllBotsPanelProps> = ({ uiTheme, bots, onClo
 
     return (
         <div style={{
-            position: 'fixed',
-            top: '50%',
-            left: '50%',
-            transform: 'translate(-50%, -50%)',
+            position: 'relative',
             width: 'min(900px, 95vw)', // Responsive: cap at 95vw on mobile
             maxHeight: '80vh',
             background: uiTheme.panelBg,
@@ -43,7 +40,6 @@ export const AllBotsPanel: React.FC<AllBotsPanelProps> = ({ uiTheme, bots, onClo
             border: `1px solid ${uiTheme.borderColor}`,
             borderRadius: '16px',
             boxShadow: '0 20px 50px rgba(0,0,0,0.5)',
-            zIndex: 100, // Top level
             display: 'flex',
             flexDirection: 'column',
             fontFamily: '"SF Pro Display", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',

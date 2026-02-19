@@ -27,14 +27,11 @@ export function AirQualityPanel({
   return (
     <div
       style={{
-        position: 'absolute',
-        top: '115px',
-        right: '8px',
+        position: 'relative',
         width: '330px',
         background: uiTheme.panelBg,
         border: `1px solid ${uiTheme.borderColor}`,
         borderRadius: '12px',
-        zIndex: 15,
         fontFamily: "'Inter', system-ui, sans-serif",
         backdropFilter: 'blur(10px)',
         padding: '16px 18px',
@@ -43,10 +40,10 @@ export function AirQualityPanel({
       }}
     >
       {/* Header */}
-      <div style={{ 
-        display: 'flex', 
-        justifyContent: 'space-between', 
-        alignItems: 'center', 
+      <div style={{
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
         marginBottom: '16px',
         paddingBottom: '12px',
         borderBottom: `1px solid ${uiTheme.borderColor}`,
@@ -72,21 +69,21 @@ export function AirQualityPanel({
           ✕
         </button>
       </div>
-      
+
       {/* AQI Summary Cards */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '18px' }}>
         {/* US AQI Card */}
-        <div style={{ 
+        <div style={{
           background: `${getAQIColor(airQuality.us_aqi)}15`,
           padding: '14px',
           borderRadius: '10px',
           border: `2px solid ${getAQIColor(airQuality.us_aqi)}40`,
           textAlign: 'center' as const,
         }}>
-          <div style={{ 
-            color: getAQIColor(airQuality.us_aqi), 
-            fontSize: '28px', 
-            fontWeight: 700, 
+          <div style={{
+            color: getAQIColor(airQuality.us_aqi),
+            fontSize: '28px',
+            fontWeight: 700,
             marginBottom: '4px',
             textShadow: `0 0 10px ${getAQIColor(airQuality.us_aqi)}40`
           }}>
@@ -95,9 +92,9 @@ export function AirQualityPanel({
           <div style={{ color: uiTheme.textSecondary, fontSize: '10px', textTransform: 'uppercase' as const, letterSpacing: '0.5px' }}>
             US AQI
           </div>
-          <div style={{ 
-            color: getAQIColor(airQuality.us_aqi), 
-            fontSize: '9px', 
+          <div style={{
+            color: getAQIColor(airQuality.us_aqi),
+            fontSize: '9px',
             fontWeight: 600,
             marginTop: '6px',
             textTransform: 'uppercase' as const
@@ -107,17 +104,17 @@ export function AirQualityPanel({
         </div>
 
         {/* European AQI Card */}
-        <div style={{ 
-          background: 'rgba(74, 158, 255, 0.1)', 
+        <div style={{
+          background: 'rgba(74, 158, 255, 0.1)',
           padding: '14px',
           borderRadius: '10px',
           border: '2px solid rgba(74, 158, 255, 0.3)',
           textAlign: 'center' as const,
         }}>
-          <div style={{ 
-            color: '#4a9eff', 
-            fontSize: '28px', 
-            fontWeight: 700, 
+          <div style={{
+            color: '#4a9eff',
+            fontSize: '28px',
+            fontWeight: 700,
             marginBottom: '4px',
             textShadow: '0 0 10px rgba(74, 158, 255, 0.4)'
           }}>
@@ -126,9 +123,9 @@ export function AirQualityPanel({
           <div style={{ color: uiTheme.textSecondary, fontSize: '10px', textTransform: 'uppercase' as const, letterSpacing: '0.5px' }}>
             European AQI
           </div>
-          <div style={{ 
-            color: uiTheme.textSecondary, 
-            fontSize: '9px', 
+          <div style={{
+            color: uiTheme.textSecondary,
+            fontSize: '9px',
             marginTop: '6px'
           }}>
             (0-100 scale)
@@ -138,10 +135,10 @@ export function AirQualityPanel({
 
       {/* Particulate Matter */}
       <div style={{ marginBottom: '14px' }}>
-        <div style={{ 
-          color: uiTheme.textSecondary, 
-          fontSize: '9px', 
-          textTransform: 'uppercase' as const, 
+        <div style={{
+          color: uiTheme.textSecondary,
+          fontSize: '9px',
+          textTransform: 'uppercase' as const,
           letterSpacing: '1px',
           marginBottom: '10px',
           fontWeight: 600
@@ -149,9 +146,9 @@ export function AirQualityPanel({
           🪨 Particulate Matter
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
-          <div style={{ 
-            background: 'rgba(255,255,255,0.05)', 
-            padding: '10px 12px', 
+          <div style={{
+            background: 'rgba(255,255,255,0.05)',
+            padding: '10px 12px',
             borderRadius: '8px',
             border: `1px solid ${uiTheme.borderColor}`,
           }}>
@@ -160,9 +157,9 @@ export function AirQualityPanel({
               {airQuality.pm2_5} <span style={{ fontSize: '10px', color: uiTheme.textMuted }}>µg/m³</span>
             </div>
           </div>
-          <div style={{ 
-            background: 'rgba(255,255,255,0.05)', 
-            padding: '10px 12px', 
+          <div style={{
+            background: 'rgba(255,255,255,0.05)',
+            padding: '10px 12px',
             borderRadius: '8px',
             border: `1px solid ${uiTheme.borderColor}`,
           }}>
@@ -176,10 +173,10 @@ export function AirQualityPanel({
 
       {/* Gases */}
       <div>
-        <div style={{ 
-          color: uiTheme.textSecondary, 
-          fontSize: '9px', 
-          textTransform: 'uppercase' as const, 
+        <div style={{
+          color: uiTheme.textSecondary,
+          fontSize: '9px',
+          textTransform: 'uppercase' as const,
           letterSpacing: '1px',
           marginBottom: '10px',
           fontWeight: 600
@@ -187,9 +184,9 @@ export function AirQualityPanel({
           💨 Atmospheric Gases
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
-          <div style={{ 
-            background: 'rgba(255,255,255,0.05)', 
-            padding: '8px 10px', 
+          <div style={{
+            background: 'rgba(255,255,255,0.05)',
+            padding: '8px 10px',
             borderRadius: '8px',
             border: `1px solid ${uiTheme.borderColor}`,
           }}>
@@ -198,9 +195,9 @@ export function AirQualityPanel({
               {airQuality.ozone} <span style={{ fontSize: '9px', color: uiTheme.textMuted }}>µg/m³</span>
             </div>
           </div>
-          <div style={{ 
-            background: 'rgba(255,255,255,0.05)', 
-            padding: '8px 10px', 
+          <div style={{
+            background: 'rgba(255,255,255,0.05)',
+            padding: '8px 10px',
             borderRadius: '8px',
             border: `1px solid ${uiTheme.borderColor}`,
           }}>
@@ -209,9 +206,9 @@ export function AirQualityPanel({
               {airQuality.nitrogen_dioxide} <span style={{ fontSize: '9px', color: uiTheme.textMuted }}>µg/m³</span>
             </div>
           </div>
-          <div style={{ 
-            background: 'rgba(255,255,255,0.05)', 
-            padding: '8px 10px', 
+          <div style={{
+            background: 'rgba(255,255,255,0.05)',
+            padding: '8px 10px',
             borderRadius: '8px',
             border: `1px solid ${uiTheme.borderColor}`,
           }}>
@@ -220,9 +217,9 @@ export function AirQualityPanel({
               {airQuality.sulphur_dioxide} <span style={{ fontSize: '9px', color: uiTheme.textMuted }}>µg/m³</span>
             </div>
           </div>
-          <div style={{ 
-            background: 'rgba(255,255,255,0.05)', 
-            padding: '8px 10px', 
+          <div style={{
+            background: 'rgba(255,255,255,0.05)',
+            padding: '8px 10px',
             borderRadius: '8px',
             border: `1px solid ${uiTheme.borderColor}`,
           }}>
@@ -235,8 +232,8 @@ export function AirQualityPanel({
       </div>
 
       {/* Info Footer */}
-      <div style={{ 
-        fontSize: '9px', 
+      <div style={{
+        fontSize: '9px',
         color: uiTheme.textMuted,
         marginTop: '14px',
         paddingTop: '12px',

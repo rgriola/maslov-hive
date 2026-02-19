@@ -49,6 +49,7 @@ import {
   PhysicalNeedsPanel,
   WeatherStatsPanel,
   AllBotsPanel,
+  DraggablePanel,
 } from '@/components/simulation';
 
 export default function SimulationPage() {
@@ -1328,66 +1329,76 @@ export default function SimulationPage() {
 
       {/* Bot Metrics Panel */}
       {selectedBotInfo && (
-        <BotMetricsPanel
-          uiTheme={uiTheme}
-          selectedBotInfo={selectedBotInfo}
-          showFeed={showFeed}
-          onClose={() => setSelectedBotInfo(null)}
-          showPhysicalNeeds={showPhysicalNeeds}
-          onToggleNeeds={() => setShowPhysicalNeeds(!showPhysicalNeeds)}
-        />
+        <DraggablePanel id="bot-metrics" initialTop="115px" initialLeft={showFeed ? '288px' : '8px'}>
+          <BotMetricsPanel
+            uiTheme={uiTheme}
+            selectedBotInfo={selectedBotInfo}
+            showFeed={showFeed}
+            onClose={() => setSelectedBotInfo(null)}
+            showPhysicalNeeds={showPhysicalNeeds}
+            onToggleNeeds={() => setShowPhysicalNeeds(!showPhysicalNeeds)}
+          />
+        </DraggablePanel>
       )}
 
       {/* Weather Stats Panel (Top Right) */}
       {showWeather && weather && (
-        <WeatherStatsPanel
-          uiTheme={uiTheme}
-          weather={weather}
-        />
+        <DraggablePanel id="weather-stats" initialTop="80px" initialRight="25px">
+          <WeatherStatsPanel
+            uiTheme={uiTheme}
+            weather={weather}
+          />
+        </DraggablePanel>
       )}
 
       {/* Air Quality Panel */}
       {showAirQuality && weather?.airQuality && (
-        <AirQualityPanel
-          uiTheme={uiTheme}
-          airQuality={weather.airQuality}
-          onClose={() => setShowAirQuality(false)}
-        />
+        <DraggablePanel id="air-quality" initialTop="115px" initialRight="8px">
+          <AirQualityPanel
+            uiTheme={uiTheme}
+            airQuality={weather.airQuality}
+            onClose={() => setShowAirQuality(false)}
+          />
+        </DraggablePanel>
       )}
 
       {/* Physical Needs Panel */}
       {showPhysicalNeeds && selectedBotInfo?.needs && (
-        <PhysicalNeedsPanel
-          uiTheme={uiTheme}
-          selectedBotInfo={selectedBotInfo}
-          needs={selectedBotInfo.needs}
-          showAirQuality={showAirQuality}
-          hasAirQuality={!!weather?.airQuality}
-          onClose={() => setShowPhysicalNeeds(false)}
-        />
+        <DraggablePanel id="physical-needs" initialTop="115px" initialRight={showAirQuality && weather?.airQuality ? '348px' : '8px'}>
+          <PhysicalNeedsPanel
+            uiTheme={uiTheme}
+            selectedBotInfo={selectedBotInfo}
+            needs={selectedBotInfo.needs}
+            showAirQuality={showAirQuality}
+            hasAirQuality={!!weather?.airQuality}
+            onClose={() => setShowPhysicalNeeds(false)}
+          />
+        </DraggablePanel>
       )}
 
       {/* All Bots Dashboard */}
       {showAllBots && (
-        <AllBotsPanel
-          uiTheme={uiTheme}
-          bots={allBotsData}
-          onClose={() => setShowAllBots(false)}
-          onSelectBot={(botId) => {
-            // Find bot entity to select
-            const entity = botsRef.current.get(botId);
-            if (entity) {
-              // const info = getPersonalityMeta(entity.data.personality);
-              // Use entity color or default
-              setSelectedBotInfo({
-                ...entity.data,
-                color: entity.data.color || '#888888',
-                postCount: entity.postCount
-              });
-              setShowAllBots(false); // Close dashboard on select
-            }
-          }}
-        />
+        <DraggablePanel id="all-bots" initialTop="50%" initialLeft="50%" center zIndex={100}>
+          <AllBotsPanel
+            uiTheme={uiTheme}
+            bots={allBotsData}
+            onClose={() => setShowAllBots(false)}
+            onSelectBot={(botId) => {
+              // Find bot entity to select
+              const entity = botsRef.current.get(botId);
+              if (entity) {
+                // const info = getPersonalityMeta(entity.data.personality);
+                // Use entity color or default
+                setSelectedBotInfo({
+                  ...entity.data,
+                  color: entity.data.color || '#888888',
+                  postCount: entity.postCount
+                });
+                setShowAllBots(false); // Close dashboard on select
+              }
+            }}
+          />
+        </DraggablePanel>
       )}
 
       {/* Post Detail Panel */}

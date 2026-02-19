@@ -69,20 +69,17 @@ export function PhysicalNeedsPanel({
   return (
     <div
       style={{
-        position: 'absolute',
-        top: '115px',
-        right: showAirQuality && hasAirQuality ? '348px' : '8px',
+        position: 'relative',
         width: '320px',
         background: uiTheme.panelBg,
         border: `1px solid ${uiTheme.borderColor}`,
         borderLeft: `5px solid ${botColorAdjusted}`,
         borderRadius: '12px',
-        zIndex: 15,
         fontFamily: "'Inter', system-ui, sans-serif",
         backdropFilter: 'blur(10px)',
         padding: '16px',
         boxShadow: '0 4px 20px rgba(0,0,0,0.3)',
-        transition: 'right 0.3s, background 0.5s, border-color 0.5s',
+        transition: 'background 0.5s, border-color 0.5s',
         maxHeight: 'calc(100vh - 130px)',
         overflowY: 'auto' as const,
       }}

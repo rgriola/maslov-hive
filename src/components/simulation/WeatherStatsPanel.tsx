@@ -44,9 +44,7 @@ export const WeatherStatsPanel: React.FC<WeatherStatsPanelProps> = ({ weather, u
 
     return (
         <div style={{
-            position: 'absolute',
-            top: '80px', // Below the title bar/status
-            right: '25px', // Top right corner
+            position: 'relative',
             width: '240px',
             background: uiTheme.panelBg,
             backdropFilter: 'blur(12px)',
@@ -57,8 +55,6 @@ export const WeatherStatsPanel: React.FC<WeatherStatsPanelProps> = ({ weather, u
             color: uiTheme.textPrimary,
             fontFamily: '"SF Pro Display", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
             boxShadow: '0 8px 32px rgba(0, 0, 0, 0.2)',
-            zIndex: 10,
-            transition: 'all 0.3s ease',
             display: 'flex',
             flexDirection: 'column',
             gap: '12px'

@@ -12,6 +12,7 @@ export { PhysicalNeedsPanel } from './PhysicalNeedsPanel';
 export { WeatherStatsPanel } from './WeatherStatsPanel';
 export { AllBotsPanel } from './AllBotsPanel';
 export { StatusBar } from './StatusBar';
+export { DraggablePanel } from './DraggablePanel';
 
 // Reusable components
 export { NeedsMeter, NeedsMeterWithIcon, NeedsGridCard } from './NeedsMeter';

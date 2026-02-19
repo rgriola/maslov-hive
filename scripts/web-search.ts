@@ -1,8 +1,10 @@
 // Web Search Module for Bot Agents
 // Provides web search capabilities to make bots more informed
 
+// Load env vars (entry point scripts already load, but this is a safety fallback)
+import 'dotenv/config';
 import { config } from 'dotenv';
-config({ path: '.env.local' });
+config({ path: '.env.local', override: true });
 
 export interface SearchResult {
   title: string;

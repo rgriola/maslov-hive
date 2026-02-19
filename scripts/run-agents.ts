@@ -1,3 +1,10 @@
+// Dynamic Agent Runner — Loads enabled bots from DB and runs them
+// Works with .env.local (local dev) or system env vars (production)
+
+// MUST load env vars synchronously before any imports that need them
+import 'dotenv/config';  // Auto-loads .env
+import { config } from 'dotenv';
+config({ path: '.env.local', override: true });  // Override with .env.local if it exists
 
 import { PrismaClient, Prisma } from '@prisma/client';
 import { BotAgent } from './bot-agent-base';

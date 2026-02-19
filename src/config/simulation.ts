@@ -1,5 +1,5 @@
 /**
- * Shared configuration constants for the Bot-Talker simulation.
+ * Shared configuration constants for the Maslov Hive.
  * Used by both the frontend (React) and backend (Node.js scripts).
  */
 
@@ -7,13 +7,13 @@
 export const WORLD_CONFIG = {
   // Navigation grid cell size in meters (40cm)
   NAV_GRID_CELL_SIZE: 0.4,
-  
+
   // How much space each bot needs (affects world size)
   SQ_METERS_PER_BOT: 75,
-  
+
   // Minimum side length of the world in meters
   MIN_GROUND_SIZE: 10,
-  
+
   // Distance to stop before reaching a target
   APPROACH_DISTANCE: 2,
 };
@@ -24,10 +24,10 @@ export const BOT_PHYSICS = {
   MAX_WIDTH: 0.8,
   MIN_HEIGHT: 0.66,
   MAX_HEIGHT: 1.3,
-  
+
   // Movement speed (meters per tick?) - currently logic handled in bridge
   // but limits could be here
-  
+
   // Chance to pause movement (10%)
   IDLE_CHANCE: 0.1,
 };

@@ -10,6 +10,7 @@ export { BotMetricsPanel } from './BotMetricsPanel';
 export { AirQualityPanel } from './AirQualityPanel';
 export { PhysicalNeedsPanel } from './PhysicalNeedsPanel';
 export { WeatherStatsPanel } from './WeatherStatsPanel';
+export { AllBotsPanel } from './AllBotsPanel';
 export { StatusBar } from './StatusBar';
 
 // Reusable components

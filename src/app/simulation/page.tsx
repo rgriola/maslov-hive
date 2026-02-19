@@ -48,6 +48,7 @@ import {
   AirQualityPanel,
   PhysicalNeedsPanel,
   WeatherStatsPanel,
+  AllBotsPanel,
 } from '@/components/simulation';
 
 export default function SimulationPage() {
@@ -81,6 +82,9 @@ export default function SimulationPage() {
   const [location, setLocation] = useState<{ lat: number; lng: number } | null>(null);
   const weather = useWeather({ location });
   const [showAirQuality, setShowAirQuality] = useState(false);
+  const [showWeather, setShowWeather] = useState(true);
+  const [showAllBots, setShowAllBots] = useState(false);
+  const [allBotsData, setAllBotsData] = useState<BotData[]>([]);
   const [showPhysicalNeeds, setShowPhysicalNeeds] = useState(false);
   const [simSpeed, setSimSpeed] = useState(1);
   // Particle system refs for weather effects
@@ -588,6 +592,17 @@ export default function SimulationPage() {
     }, 6000);
   }, []);
 
+  // ─── Data Sync for All Bots Panel ────────────────────────────
+  useEffect(() => {
+    if (!showAllBots) return;
+    const syncTimer = setInterval(() => {
+      // Snapshot active bot data from Three.js refs for React UI
+      const bots = Array.from(botsRef.current.values()).map(entity => entity.data);
+      setAllBotsData(bots);
+    }, 1000);
+    return () => clearInterval(syncTimer);
+  }, [showAllBots]);
+
   // ─── Main Setup ──────────────────────────────────────────────
 
   useEffect(() => {
@@ -987,7 +1002,8 @@ export default function SimulationPage() {
 
     function connectWebSocket() {
       if (disposed) return;
-      const ws = new WebSocket('ws://localhost:8080');
+      const wsUrl = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8080';
+      const ws = new WebSocket(wsUrl);
       wsRef.current = ws;
 
       ws.onopen = () => {
@@ -1254,6 +1270,10 @@ export default function SimulationPage() {
         selectedBotInfo={selectedBotInfo}
         showAirQuality={showAirQuality}
         setShowAirQuality={setShowAirQuality}
+        showWeather={showWeather}
+        setShowWeather={setShowWeather}
+        showAllBots={showAllBots}
+        setShowAllBots={setShowAllBots}
         statusRef={statusRef}
         onReset={handleReset}
         simSpeed={simSpeed}
@@ -1285,7 +1305,7 @@ export default function SimulationPage() {
       )}
 
       {/* Weather Stats Panel (Top Right) */}
-      {weather && (
+      {showWeather && weather && (
         <WeatherStatsPanel
           uiTheme={uiTheme}
           weather={weather}
@@ -1310,6 +1330,29 @@ export default function SimulationPage() {
           showAirQuality={showAirQuality}
           hasAirQuality={!!weather?.airQuality}
           onClose={() => setShowPhysicalNeeds(false)}
+        />
+      )}
+
+      {/* All Bots Dashboard */}
+      {showAllBots && (
+        <AllBotsPanel
+          uiTheme={uiTheme}
+          bots={allBotsData}
+          onClose={() => setShowAllBots(false)}
+          onSelectBot={(botId) => {
+            // Find bot entity to select
+            const entity = botsRef.current.get(botId);
+            if (entity) {
+              // const info = getPersonalityMeta(entity.data.personality);
+              // Use entity color or default
+              setSelectedBotInfo({
+                ...entity.data,
+                color: entity.data.color || '#888888',
+                postCount: entity.postCount
+              });
+              setShowAllBots(false); // Close dashboard on select
+            }
+          }}
         />
       )}
 

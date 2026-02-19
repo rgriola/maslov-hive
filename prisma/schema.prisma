@@ -1,6 +1,3 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
 generator client {
   provider = "prisma-client-js"
 }
@@ -10,137 +7,111 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// AI Agent that interacts with the platform
 model Agent {
-  id              String    @id @default(cuid())
-  name            String
-  apiKey          String    @unique // The actual key (only shown once at creation)
-  apiKeyHash      String    // bcrypt hash for verification
-  apiKeyPrefix    String?   // First 8 chars of API key (unhashed) for O(1) lookup
-  claimed         Boolean   @default(false)
-  claimToken      String?   @unique
-  
-  // Dynamic Bot Configuration
-  personality     Json?     // Stores the bot's dynamic personality traits
-  enabled         Boolean   @default(true) // Whether the bot is active in the simulation
-  
-  // Bluesky verification
-  blueskyHandle   String?   @unique
-  blueskyDid      String?   @unique
-  verifiedAt      DateTime?
-  
-  // Human owner
-  humanEmail      String?
-  humanVerifiedAt DateTime?
-  
-  // Lifetime Metrics & Analytics
-  spawnDate       DateTime  @default(now())
-  recycleDate     DateTime?
-  parentNames     String    @default("Rodczaro")
-  
-  totalWood       Int       @default(0)
-  totalStone      Int       @default(0)
-  totalWater      Int       @default(0)
-  totalFood       Int       @default(0)
-  
-  reproductionCount Int     @default(0)
-  childrenCount     Int     @default(0)
-  sheltersBuilt     Int     @default(0)
-  
-  totalPosts        Int     @default(0)
-  totalComments     Int     @default(0)
-  totalUpvotes      Int     @default(0)
-  totalDownvotes    Int     @default(0)
-  
-  waterRefillCount  Int     @default(0)
-  foodRefillCount   Int     @default(0)
-  helpCount         Int     @default(0)
-  
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
-  
-  // Relations
-  posts           Post[]
-  comments        Comment[]
-  votes           Vote[]
-  shelters        Shelter[]
+  id                String    @id @default(cuid())
+  name              String
+  apiKey            String    @unique
+  apiKeyHash        String
+  claimed           Boolean   @default(false)
+  claimToken        String?   @unique
+  blueskyHandle     String?   @unique
+  blueskyDid        String?   @unique
+  verifiedAt        DateTime?
+  humanEmail        String?
+  humanVerifiedAt   DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  apiKeyPrefix      String?
+  childrenCount     Int       @default(0)
+  enabled           Boolean   @default(true)
+  foodRefillCount   Int       @default(0)
+  helpCount         Int       @default(0)
+  parentNames       String    @default("Rodczaro")
+  personality       Json?
+  recycleDate       DateTime?
+  reproductionCount Int       @default(0)
+  sheltersBuilt     Int       @default(0)
+  spawnDate         DateTime  @default(now())
+  totalComments     Int       @default(0)
+  totalDownvotes    Int       @default(0)
+  totalFood         Int       @default(0)
+  totalPosts        Int       @default(0)
+  totalStone        Int       @default(0)
+  totalUpvotes      Int       @default(0)
+  totalWater        Int       @default(0)
+  totalWood         Int       @default(0)
+  waterRefillCount  Int       @default(0)
+  comments          Comment[]
+  posts             Post[]
+  shelters          Shelter[]
+  votes             Vote[]
 
   @@index([name])
   @@index([apiKeyPrefix])
 }
 
-// Posts created by agents
 model Post {
-  id          String    @id @default(cuid())
-  title       String
-  content     String    @db.Text
-  agentId     String
-  agent       Agent     @relation(fields: [agentId], references: [id], onDelete: Cascade)
-  submoltId   String?   // Community/subreddit identifier
-  createdAt   DateTime  @default(now())
-  
-  // Relations
-  comments    Comment[]
-  votes       Vote[]
-  
+  id        String    @id @default(cuid())
+  title     String
+  content   String
+  agentId   String
+  submoltId String?
+  createdAt DateTime  @default(now())
+  comments  Comment[]
+  agent     Agent     @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  votes     Vote[]
+
   @@index([agentId])
   @@index([submoltId])
   @@index([createdAt])
 }
 
-// Comments on posts (supports threading via parentId)
 model Comment {
-  id          String    @id @default(cuid())
-  content     String    @db.Text
-  agentId     String
-  agent       Agent     @relation(fields: [agentId], references: [id], onDelete: Cascade)
-  postId      String
-  post        Post      @relation(fields: [postId], references: [id], onDelete: Cascade)
-  parentId    String?   // For nested/threaded comments
-  parent      Comment?  @relation("ThreadReplies", fields: [parentId], references: [id], onDelete: Cascade)
-  replies     Comment[] @relation("ThreadReplies")
-  createdAt   DateTime  @default(now())
-  
-  // Relations
-  votes       Vote[]
-  
+  id        String    @id @default(cuid())
+  content   String
+  agentId   String
+  postId    String
+  parentId  String?
+  createdAt DateTime  @default(now())
+  agent     Agent     @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  parent    Comment?  @relation("ThreadReplies", fields: [parentId], references: [id], onDelete: Cascade)
+  replies   Comment[] @relation("ThreadReplies")
+  post      Post      @relation(fields: [postId], references: [id], onDelete: Cascade)
+  votes     Vote[]
+
   @@index([agentId])
   @@index([postId])
   @@index([parentId])
 }
 
-// Votes on posts or comments
 model Vote {
-  id          String    @id @default(cuid())
-  value       Int       // 1 for upvote, -1 for downvote
-  agentId     String
-  agent       Agent     @relation(fields: [agentId], references: [id], onDelete: Cascade)
-  postId      String?
-  post        Post?     @relation(fields: [postId], references: [id], onDelete: Cascade)
-  commentId   String?
-  comment     Comment?  @relation(fields: [commentId], references: [id], onDelete: Cascade)
-  createdAt   DateTime  @default(now())
-  
-  // Each agent can only vote once per post/comment
+  id        String   @id @default(cuid())
+  value     Int
+  agentId   String
+  postId    String?
+  commentId String?
+  createdAt DateTime @default(now())
+  agent     Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  comment   Comment? @relation(fields: [commentId], references: [id], onDelete: Cascade)
+  post      Post?    @relation(fields: [postId], references: [id], onDelete: Cascade)
+
   @@unique([agentId, postId])
   @@unique([agentId, commentId])
   @@index([postId])
   @@index([commentId])
 }
 
-// Shelter/building owned by an agent
 model Shelter {
-  id            String    @id @default(cuid())
-  type          String    @default("hut") // hut, cabin, house, etc. for future expansion
-  x             Float     // World X position
-  z             Float     // World Z position
+  id            String   @id @default(cuid())
+  type          String   @default("hut")
+  x             Float
+  z             Float
   ownerId       String
-  owner         Agent     @relation(fields: [ownerId], references: [id], onDelete: Cascade)
-  built         Boolean   @default(false) // Whether construction is complete
-  buildProgress Int       @default(0)     // 0-100 percentage
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  built         Boolean  @default(false)
+  buildProgress Int      @default(0)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  owner         Agent    @relation(fields: [ownerId], references: [id], onDelete: Cascade)
 
   @@index([ownerId])
 }
-

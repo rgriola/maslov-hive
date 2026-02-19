@@ -2,6 +2,11 @@
 // Loads bots from DB, simulates autonomous movement, broadcasts state to viewers
 // Run alongside Next.js: npm run ws:bridge
 
+// MUST load env vars synchronously before any imports that need them
+import 'dotenv/config';  // Auto-loads .env
+import { config } from 'dotenv';
+config({ path: '.env.local', override: true });  // Override with .env.local if it exists
+
 import { WebSocketServer, WebSocket } from 'ws';
 import { PrismaClient } from '@prisma/client';
 import {
@@ -27,7 +32,7 @@ import {
 } from '@/lib/world-physics';
 
 const prisma = new PrismaClient();
-const PORT = 8080;
+const PORT = parseInt(process.env.PORT || '8080', 10);
 const wss = new WebSocketServer({ port: PORT });
 
 // ─── Types ───────────────────────────────────────────────────────
@@ -443,16 +448,21 @@ function simulateMovement() {
       const isSleeping = bot.state === 'sleeping';
 
       bot.needs = decayNeeds(bot.needs, elapsedMinutes, {
-        homeostasis: 5 * tempMod * aqiMod,
+        homeostasis: 2 * tempMod * aqiMod, // Reduced base decay from 5 to 2
         water: isSleeping ? 0 : 100 * laborMultiplier,
         food: isSleeping ? 0 : 50 * laborMultiplier,
       });
 
-      // ─── Passive Recovery: "Thriving" State ────────────────
-      // If basic needs are high (>70%), homeostasis slowly recovers automatically
-      if (bot.needs.water > 70 && bot.needs.food > 70 && bot.needs.sleep > 70 &&
-        bot.needs.clothing > 30 && bot.needs.shelter > 30) {
-        // Slowly heal (approx 5 points per minute when thriving)
+      // ─── Passive Recovery: "Stable" & "Thriving" ────────────────
+      // Stable Maintenance: If not critical (>40%), slowly heal/maintain
+      if (bot.needs.water > 40 && bot.needs.food > 40 && bot.needs.sleep > 40 &&
+        bot.needs.clothing > 20 && bot.needs.shelter > 20) {
+        bot.needs = fulfillNeed(bot.needs, 'homeostasis', 1 * elapsedMinutes);
+      }
+
+      // Thriving Boost: If needs are good (>60%), heal faster
+      if (bot.needs.water > 60 && bot.needs.food > 60 && bot.needs.sleep > 60) {
+        // Boost health (approx 5 points per minute)
         bot.needs = fulfillNeed(bot.needs, 'homeostasis', 5 * elapsedMinutes);
       }
       bot.lastNeedUpdate = now;

@@ -1,10 +1,12 @@
 // Gemini AI integration for agent content generation
+
+// Load env vars (entry point scripts already load, but this is a safety fallback)
+import 'dotenv/config';
 import { config } from 'dotenv';
+config({ path: '.env.local', override: true });
+
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { AI_CONFIG, TIMING } from './config';
-
-// Load environment variables from .env.local
-config({ path: '.env.local' });
 
 const apiKey = process.env.GEMINI_API_KEY;
 

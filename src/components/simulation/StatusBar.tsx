@@ -20,6 +20,14 @@ export interface StatusBarProps {
   showAirQuality: boolean;
   /** Callback to toggle air quality panel */
   setShowAirQuality: (show: boolean) => void;
+  /** Whether weather panel is shown */
+  showWeather: boolean;
+  /** Callback to toggle weather panel */
+  setShowWeather: (show: boolean) => void;
+  /** Whether all bots panel is shown */
+  showAllBots: boolean;
+  /** Callback to toggle all bots panel */
+  setShowAllBots: (show: boolean) => void;
   /** Ref for connection status element */
   statusRef: RefObject<HTMLDivElement | null>;
   /** Callback to reset camera view */
@@ -43,6 +51,10 @@ export function StatusBar({
   selectedBotInfo,
   showAirQuality,
   setShowAirQuality,
+  showWeather,
+  setShowWeather,
+  showAllBots,
+  setShowAllBots,
   statusRef,
   onReset,
   simSpeed,
@@ -71,7 +83,7 @@ export function StatusBar({
       <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
         <span style={{ fontSize: '20px' }}>🌍</span>
         <span style={{ color: '#e0e0ff', fontWeight: 600, fontSize: '15px', letterSpacing: '0.5px' }}>
-          Bot-Talker Simulation
+          Maslov Hive
         </span>
       </div>
 
@@ -90,27 +102,54 @@ export function StatusBar({
           </div>
         )}
 
-        {/* Weather */}
+        {/* Weather (Clickable) */}
         {weather && (
-          <div style={{
-            fontSize: '12px',
-            color: '#e0e0ff',
-            fontFamily: 'system-ui',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '8px',
-            background: 'rgba(74, 158, 255, 0.1)',
-            padding: '4px 10px',
-            borderRadius: '6px',
-            border: '1px solid rgba(74, 158, 255, 0.2)',
-          }}>
+          <button
+            onClick={() => setShowWeather(!showWeather)}
+            style={{
+              fontSize: '12px',
+              color: '#e0e0ff',
+              fontFamily: 'system-ui',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              background: showWeather ? 'rgba(74, 158, 255, 0.2)' : 'rgba(74, 158, 255, 0.05)',
+              padding: '4px 10px',
+              borderRadius: '6px',
+              border: `1px solid ${showWeather ? 'rgba(74, 158, 255, 0.4)' : 'rgba(74, 158, 255, 0.15)'}`,
+              cursor: 'pointer',
+              transition: 'all 0.2s',
+            }}
+          >
             <span style={{ fontSize: '18px' }}>{getWeatherEmoji(weather)}</span>
             <div style={{ textAlign: 'left' }}>
               <div style={{ fontWeight: 600 }}>{weather.temperature}°F</div>
               <div style={{ fontSize: '10px', color: '#a0a0c0' }}>{weather.condition}</div>
             </div>
-          </div>
+          </button>
         )}
+
+        {/* All Bots Toggle */}
+        <button
+          onClick={() => setShowAllBots(!showAllBots)}
+          style={{
+            fontSize: '12px',
+            color: '#e0e0ff',
+            fontFamily: 'system-ui',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+            background: showAllBots ? 'rgba(74, 158, 255, 0.2)' : 'rgba(74, 158, 255, 0.05)',
+            padding: '4px 10px',
+            borderRadius: '6px',
+            border: `1px solid ${showAllBots ? 'rgba(74, 158, 255, 0.4)' : 'rgba(74, 158, 255, 0.15)'}`,
+            cursor: 'pointer',
+            transition: 'all 0.2s',
+          }}
+        >
+          <span style={{ fontSize: '16px' }}>👥</span>
+          <span style={{ fontWeight: 600 }}>Bots</span>
+        </button>
 
         {/* Air Quality Button */}
         {weather?.airQuality && (

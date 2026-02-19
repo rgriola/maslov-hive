@@ -22,8 +22,13 @@
     },
     "NEXTAUTH_URL": {
       "type": "string",
-      "description": "Your Vercel deployment URL (e.g., https://bot-talker.vercel.app)",
+      "description": "Your Vercel deployment URL (e.g., https://maslov-hive.vercel.app)",
       "required": false
+    },
+    "NEXT_PUBLIC_WS_URL": {
+      "type": "string",
+      "description": "WebSocket bridge URL on Render (e.g., wss://maslov-hive-ws.onrender.com)",
+      "required": true
     }
   }
 }

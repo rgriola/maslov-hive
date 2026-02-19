@@ -1,6 +1,13 @@
-// WebSocket Bridge — Drives the 3D simulation
-// Loads bots from DB, simulates autonomous movement, broadcasts state to viewers
-// Run alongside Next.js: npm run ws:bridge
+/**
+ * WebSocket Bridge — Real-time 3D simulation backend for bot movement & state broadcasting
+ * 
+ * Loads bots from DB, simulates autonomous movement with A* pathfinding,
+ * manages physical needs (water, food, sleep), and broadcasts state to viewers.
+ * 
+ * Run: npx tsx scripts/websocket-bridge.ts
+ * 
+ * @refactored Feb 18, 2026 — ESLint fixes, type safety improvements
+ */
 
 // MUST load env vars synchronously before any imports that need them
 import 'dotenv/config';  // Auto-loads .env
@@ -8,9 +15,8 @@ import { config } from 'dotenv';
 config({ path: '.env.local', override: true });  // Override with .env.local if it exists
 
 import { WebSocketServer, WebSocket } from 'ws';
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient, Agent } from '@prisma/client';
 import {
-  PhysicalNeeds,
   initializeNeeds,
   decayNeeds,
   fulfillNeed,
@@ -19,7 +25,7 @@ import {
   isInCriticalCondition,
   NEED_THRESHOLDS
 } from './bot-needs';
-import { BotState, WorldConfig, ShelterData } from '@/types/simulation';
+import { BotState, WorldConfig } from '@/types/simulation';
 import { WORLD_CONFIG, BOT_PHYSICS } from '@/config/simulation';
 import { findPath } from '@/lib/pathfinding';
 import {
@@ -27,8 +33,7 @@ import {
   randomBotWidth,
   randomBotHeight,
   randomBotShape,
-  detectPersonality,
-  isWalkable
+  detectPersonality
 } from '@/lib/world-physics';
 
 // AI Agent imports (for integrated content generation)
@@ -60,7 +65,7 @@ const greetingTimestamps = new Map<string, number[]>(); // botId → timestamps 
 const agentInstances = new Map<string, BotAgent>();
 let agentConnector: PrismaConnector | null = null;
 
-let worldConfig: WorldConfig = {
+const worldConfig: WorldConfig = {
   groundRadius: 15,
   botCount: 0,
   waterSpots: [], // Initialize empty, will add water spot during init
@@ -80,7 +85,6 @@ const TICK_INTERVAL = 200;        // ms between movement ticks (5x per second)
 const POLL_INTERVAL = 5000;       // ms between DB polls
 
 let simSpeedMultiplier = 1;       // 1x, 2x, 4x speed
-let movementTimeout: NodeJS.Timeout | null = null;
 // Cooldowns to prevent spamming
 const sharingCooldowns = new Map<string, number>(); // key: "giver-receiver", value: timestamp
 
@@ -89,11 +93,6 @@ const IDLE_CHANCE = BOT_PHYSICS.IDLE_CHANCE;
 const APPROACH_DISTANCE = WORLD_CONFIG.APPROACH_DISTANCE;
 const SQ_METERS_PER_BOT = WORLD_CONFIG.SQ_METERS_PER_BOT;
 const MIN_GROUND_SIZE = WORLD_CONFIG.MIN_GROUND_SIZE;
-const BOT_MIN_WIDTH = BOT_PHYSICS.MIN_WIDTH;
-const BOT_MAX_WIDTH = BOT_PHYSICS.MAX_WIDTH;
-const BOT_MIN_HEIGHT = BOT_PHYSICS.MIN_HEIGHT;
-const BOT_MAX_HEIGHT = BOT_PHYSICS.MAX_HEIGHT;
-const NAV_GRID_CELL_SIZE = WORLD_CONFIG.NAV_GRID_CELL_SIZE;
 
 // Helper functions removed: isWalkable, findPath, simplifyPath, random*, detectPersonality
 // Now imported from src/lib/
@@ -163,7 +162,7 @@ function createNeedsTracker() {
 }
 
 /** Initialize lifetime stats for an agent */
-function createLifetimeStats(agent?: any) {
+function createLifetimeStats(agent?: Partial<Agent>) {
   return {
     totalWood: agent?.totalWood || 0,
     totalStone: agent?.totalStone || 0,
@@ -196,7 +195,7 @@ async function handleRemoteReset() {
     await prisma.comment.deleteMany({});
     await prisma.post.deleteMany({});
     await prisma.shelter.deleteMany({});
-    await (prisma.agent as any).updateMany({
+    await prisma.agent.updateMany({
       data: {
         spawnDate: new Date(),
         totalWood: 0,
@@ -502,7 +501,7 @@ function startAgentHeartbeats() {
     if (!bot) continue;
 
     // Get personality from the agent to find the interval
-    const personality = (botAgent as any).config?.personality as Personality | undefined;
+    const personality = (botAgent as unknown as { config?: { personality?: Personality } }).config?.personality;
     const interval = personality?.postFrequency || 60000;
 
     // Initialize last heartbeat time (stagger starts)
@@ -517,7 +516,7 @@ function startAgentHeartbeats() {
 
     for (const [agentId, botAgent] of agentInstances) {
       const lastTime = agentLastHeartbeat.get(agentId) || 0;
-      const personality = (botAgent as any).config?.personality as Personality | undefined;
+      const personality = (botAgent as unknown as { config?: { personality?: Personality } }).config?.personality;
       const interval = personality?.postFrequency || 60000;
 
       // Add jitter (±10s) to prevent synchronization
@@ -2172,7 +2171,7 @@ async function broadcastNeedsPost(
 
 // ─── Broadcasting ────────────────────────────────────────────────
 
-function broadcast(message: any) {
+function broadcast(message: unknown) {
   const msg = JSON.stringify(message);
   for (const client of clients) {
     if (client.readyState === WebSocket.OPEN) {
@@ -2332,7 +2331,7 @@ async function start() {
   function tick() {
     simulateMovement();
     const nextTick = TICK_INTERVAL / simSpeedMultiplier;
-    movementTimeout = setTimeout(tick, nextTick);
+    setTimeout(tick, nextTick);
   }
   tick();
 
@@ -2375,7 +2374,7 @@ async function syncLifetimeStats() {
           waterRefillCount: bot.lifetimeStats.waterRefillCount,
           foodRefillCount: bot.lifetimeStats.foodRefillCount,
           helpCount: bot.lifetimeStats.helpCount,
-        } as any
+        }
       });
     } catch (err) {
       console.error(`❌ Failed to sync stats for ${bot.botName}:`, err);
@@ -2390,7 +2389,7 @@ async function cleanupDatabase() {
     const twelveHoursAgo = new Date(Date.now() - 12 * 60 * 60 * 1000);
 
     // 1. Delete old posts (will cascade to comments and votes)
-    const deletedPosts = await prisma.post.deleteMany({
+    await prisma.post.deleteMany({
       where: {
         createdAt: { lt: twelveHoursAgo }
       }

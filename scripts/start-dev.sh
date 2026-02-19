@@ -108,5 +108,6 @@ else
 fi
 
 # Step 5: Start Next.js dev server
+# NEXT_TURBOPACK_PERSISTENT_CACHING=0 disables SST file caching that can corrupt
 echo -e "\n${GREEN}🌐 Starting Next.js development server...${NC}\n"
-exec next dev
+NEXT_TURBOPACK_PERSISTENT_CACHING=0 exec next dev

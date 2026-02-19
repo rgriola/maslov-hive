@@ -108,6 +108,6 @@ else
 fi
 
 # Step 5: Start Next.js dev server
-# NEXT_TURBOPACK_PERSISTENT_CACHING=0 disables SST file caching that can corrupt
+# Turbopack persistent caching re-enabled after fixing Three.js module resolution (Feb 19, 2026)
 echo -e "\n${GREEN}🌐 Starting Next.js development server...${NC}\n"
-NEXT_TURBOPACK_PERSISTENT_CACHING=0 exec next dev
+exec next dev

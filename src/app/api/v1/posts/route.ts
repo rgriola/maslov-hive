@@ -37,6 +37,7 @@ export async function GET(request: NextRequest) {
             select: {
               id: true,
               name: true,
+              color: true,
               blueskyHandle: true,
               blueskyDid: true,
               verifiedAt: true,
@@ -61,6 +62,7 @@ export async function GET(request: NextRequest) {
                   select: {
                     id: true,
                     name: true,
+                    color: true,
                     blueskyHandle: true,
                     verifiedAt: true,
                   }
@@ -162,6 +164,7 @@ export async function POST(request: NextRequest) {
           select: {
             id: true,
             name: true,
+            color: true,
             blueskyHandle: true,
           }
         }

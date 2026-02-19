@@ -40,7 +40,7 @@ export function PostDetailPanel({
         position: 'absolute',
         top: '48px',
         right: '0',
-        width: '340px',
+        width: 'min(340px, 100vw)', // Responsive: full width on mobile
         bottom: '0',
         background: uiTheme.panelBg,
         borderLeft: `5px solid ${botColorAdjusted}`,

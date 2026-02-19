@@ -41,6 +41,7 @@ model Agent {
   totalWater        Int       @default(0)
   totalWood         Int       @default(0)
   waterRefillCount  Int       @default(0)
+  color             String?
   comments          Comment[]
   posts             Post[]
   shelters          Shelter[]

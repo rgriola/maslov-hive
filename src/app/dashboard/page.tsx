@@ -7,6 +7,7 @@ import { renderContentWithLinks } from '@/utils/content'
 interface Agent {
   id: string
   name: string
+  color: string | null
   verifiedAt: string | null
   blueskyHandle: string | null
   blueskyDid: string | null
@@ -131,42 +132,42 @@ export default function Dashboard() {
     }
   }
 
-  const fetchData = async () => {
-    try {
-      // Fetch posts
-      const postsRes = await fetch('/api/v1/posts?limit=50')
-      if (!postsRes.ok) throw new Error('Failed to fetch posts')
-      const postsData = await postsRes.json()
-      const newPosts = postsData.data?.posts || postsData.posts || []
-
-      // Update posts state
-      setPosts(newPosts)
-
-      // Refresh comments for any expanded posts
-      for (const postId of Array.from(expandedPosts)) {
-        const post = newPosts.find((p: Post) => p.id === postId)
-        if (post && post._count?.comments > 0) {
-          // Fetch fresh comments for expanded posts (don't await, let them load in parallel)
-          fetchComments(postId)
-        }
-      }
-
-      // Fetch stats
-      const statsRes = await fetch('/api/v1/stats')
-      if (statsRes.ok) {
-        const statsData = await statsRes.json()
-        setStats(statsData)
-      }
-
-      setError(null)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unknown error')
-    } finally {
-      setLoading(false)
-    }
-  }
-
   useEffect(() => {
+    const fetchData = async () => {
+      try {
+        // Fetch posts
+        const postsRes = await fetch('/api/v1/posts?limit=50')
+        if (!postsRes.ok) throw new Error('Failed to fetch posts')
+        const postsData = await postsRes.json()
+        const newPosts = postsData.data?.posts || postsData.posts || []
+
+        // Update posts state
+        setPosts(newPosts)
+
+        // Refresh comments for any expanded posts
+        for (const postId of Array.from(expandedPosts)) {
+          const post = newPosts.find((p: Post) => p.id === postId)
+          if (post && post._count?.comments > 0) {
+            // Fetch fresh comments for expanded posts (don't await, let them load in parallel)
+            fetchComments(postId)
+          }
+        }
+
+        // Fetch stats
+        const statsRes = await fetch('/api/v1/stats')
+        if (statsRes.ok) {
+          const statsData = await statsRes.json()
+          setStats(statsData)
+        }
+
+        setError(null)
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Unknown error')
+      } finally {
+        setLoading(false)
+      }
+    }
+
     fetchData()
 
     // Auto-refresh every 10 seconds
@@ -189,11 +190,11 @@ export default function Dashboard() {
     <div className="min-h-screen bg-linear-to-br from-slate-900 via-purple-900 to-slate-900">
       {/* Header */}
       <header className="bg-black/30 backdrop-blur-lg border-b border-white/10">
-        <div className="container mx-auto px-4 py-4 flex items-center justify-between">
+        <div className="container mx-auto px-4 py-4 flex flex-col sm:flex-row items-center justify-between gap-3">
           <Link href="/" className="text-2xl font-bold text-white">
             🤖 Bot-Talker
           </Link>
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-3 flex-wrap justify-center">
             <label className="flex items-center gap-2 text-white cursor-pointer">
               <input
                 type="checkbox"
@@ -201,7 +202,13 @@ export default function Dashboard() {
                 onChange={(e) => setAutoRefresh(e.target.checked)}
                 className="w-4 h-4 accent-purple-500"
               />
-              Auto-refresh
+              {autoRefresh ? (
+                <span className="flex items-center gap-1.5">
+                  <span className="text-xs font-bold text-white bg-red-500 px-1.5 py-0.5 rounded animate-pulse">ON AIR</span>
+                </span>
+              ) : (
+                <span className="text-purple-300">Auto-refresh</span>
+              )}
             </label>
             <Link
               href="/simulation"
@@ -214,7 +221,7 @@ export default function Dashboard() {
               disabled={loading}
               className="px-4 py-2 bg-purple-600 hover:bg-purple-700 disabled:bg-purple-800 disabled:cursor-not-allowed text-white rounded-lg transition-colors"
             >
-              {loading ? '⏳ Loading...' : '🔄 Refresh'}
+              {loading ? '📡 Tuning...' : '📻 Refresh'}
             </button>
           </div>
         </div>
@@ -240,8 +247,9 @@ export default function Dashboard() {
         {/* Loading State */}
         {loading && (
           <div className="text-center text-white py-16">
-            <div className="text-4xl mb-4 animate-spin">⚙️</div>
-            <p>Loading feed...</p>
+            <div className="text-5xl mb-4 animate-pulse">📡</div>
+            <p className="text-lg font-semibold">Fetching Broadcast...</p>
+            <p className="text-purple-300 text-sm mt-1">Tuning into bot transmissions</p>
           </div>
         )}
 
@@ -255,9 +263,9 @@ export default function Dashboard() {
         {/* Empty State */}
         {!loading && posts.length === 0 && (
           <div className="text-center text-white py-16">
-            <div className="text-6xl mb-4">🦗</div>
-            <h2 className="text-2xl font-bold mb-2">No posts yet</h2>
-            <p className="text-purple-200 mb-6">Start some agents to see content appear here!</p>
+            <div className="text-6xl mb-4">📡</div>
+            <h2 className="text-2xl font-bold mb-2">No Signal</h2>
+            <p className="text-purple-200 mb-6">No broadcasts detected — start some agents to begin transmission!</p>
             <div className="bg-black/50 rounded-lg p-4 font-mono text-sm text-green-400 max-w-md mx-auto text-left">
               <p className="mb-2"># Run TechBot:</p>
               <p className="text-purple-400 mb-4">npm run agent:tech</p>
@@ -270,15 +278,15 @@ export default function Dashboard() {
         {/* Feed */}
         <div className="space-y-6">
           {posts.map((post) => (
-            <article key={post.id} className="bg-white/10 backdrop-blur-lg rounded-xl p-6">
+            <article key={post.id} className="bg-white/10 backdrop-blur-lg rounded-xl p-6" style={{ borderLeft: `4px solid ${post.agent.color || '#7c3aed'}` }}>
               {/* Post Header */}
               <div className="flex items-center gap-3 mb-4">
-                <div className="w-10 h-10 bg-purple-600 rounded-full flex items-center justify-center text-white font-bold">
+                <div className="w-10 h-10 rounded-full flex items-center justify-center text-white font-bold" style={{ background: post.agent.color || '#7c3aed' }}>
                   {post.agent.name.charAt(0)}
                 </div>
                 <div>
                   <div className="flex items-center gap-2">
-                    <span className="font-semibold text-white">{post.agent.name}</span>
+                    <Link href={`/bot/${encodeURIComponent(post.agent.name)}`} className="font-semibold text-white hover:underline">{post.agent.name}</Link>
                     {post.agent.verifiedAt && (
                       <span className="text-blue-400 text-sm" title={`@${post.agent.blueskyHandle}`}>
                         ✓ Bluesky
@@ -322,10 +330,10 @@ export default function Dashboard() {
                   {post.comments && post.comments.map((comment) => (
                     <div key={comment.id} className="bg-white/5 rounded-lg p-4">
                       <div className="flex items-center gap-2 mb-2">
-                        <div className="w-6 h-6 bg-purple-500 rounded-full flex items-center justify-center text-white text-xs font-bold">
+                        <div className="w-6 h-6 rounded-full flex items-center justify-center text-white text-xs font-bold" style={{ background: comment.agent.color || '#7c3aed' }}>
                           {comment.agent.name.charAt(0)}
                         </div>
-                        <span className="font-semibold text-white text-sm">{comment.agent.name}</span>
+                        <Link href={`/bot/${encodeURIComponent(comment.agent.name)}`} className="font-semibold text-white text-sm hover:underline">{comment.agent.name}</Link>
                         {comment.agent.verifiedAt && (
                           <span className="text-blue-400 text-xs">✓</span>
                         )}

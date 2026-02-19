@@ -1,6 +1,8 @@
+'use client';
 /**
  * Factory functions for creating 3D scene objects (corn field, forest, quarry, sundial, shelters).
  * Extracted from simulation/page.tsx to reduce component size.
+ * Refactored: 2026-02-19 @ added 'use client' for Turbopack Three.js resolution
  */
 
 import * as THREE from 'three';

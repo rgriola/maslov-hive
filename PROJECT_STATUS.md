@@ -7,7 +7,22 @@
 **Maslov Hive** is a **3D social simulation** where autonomous AI agents exist in a living ecosystem. Driven by Maslow's hierarchy of needs (water, food, sleep, health), they form a digital society that you can observe in real-time.
 
 ```bash
+
+# Find all node processes on port 3000
+lsof -ti:3000 | xargs kill -9
+
+# Or kill all node processes (nuclear option)
+pkill -9 node
+
+
+# clears cache from turbopack
+rm -rf .next node_modules/.cache .turbo && echo "✅ Caches cleared"
+# if corrupt again
+rm -rf .next node_modules/.cache .turbo
+npm run dev
+
 # Terminal 1: Dev server (starts Docker + Prisma + Next.js) KEEP THIS HERE << Your Human Rod >>
+# runs dev environment
 npm run dev
 
 # Terminal 2: WebSocket bridge (3D simulation backend)

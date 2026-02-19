@@ -72,6 +72,7 @@ export default function SimulationPage() {
   const mouseRef = useRef<THREE.Vector2>(new THREE.Vector2());
   const [activityFeed, setActivityFeed] = useState<ActivityMessage[]>([]);
   const activityRef = useRef(setActivityFeed);  // ref relay for useEffect
+  const [wsConnected, setWsConnected] = useState(false);
   const feedRef = useRef<HTMLDivElement>(null);
   const [showFeed, setShowFeed] = useState(true);
   const [selectedPost, setSelectedPost] = useState<ActivityMessage | null>(null);
@@ -124,6 +125,8 @@ export default function SimulationPage() {
   }, []);
 
   // ─── Simulation Controls (Speed & Reset) ───────────────────
+  const isDev = process.env.NODE_ENV === 'development';
+
   const setSpeed = useCallback((speed: number) => {
     setSimSpeed(speed);
     if (wsRef.current?.readyState === WebSocket.OPEN) {
@@ -140,6 +143,9 @@ export default function SimulationPage() {
   }, []);
 
   useEffect(() => {
+    // Speed toggle only available in development
+    if (!isDev) return;
+
     const handleKeyDown = (e: KeyboardEvent) => {
       // Don't trigger if user is typing in an input
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
@@ -154,7 +160,7 @@ export default function SimulationPage() {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [setSpeed]);
+  }, [setSpeed, isDev]);
 
   // Weather data is now fetched via the useWeather hook above
 
@@ -1009,6 +1015,7 @@ export default function SimulationPage() {
       ws.onopen = () => {
         if (disposed) { ws.close(); return; }
         console.log('🔌 Connected to simulation bridge');
+        setWsConnected(true);
         if (statusRef.current) {
           statusRef.current.textContent = '🟢 Broadcasting 5x5';
           statusRef.current.style.color = '#4ade80';
@@ -1178,7 +1185,7 @@ export default function SimulationPage() {
                 id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
                 postId: msg.data.postId || undefined,
                 botName: msg.data.botName,
-                botColor: bot?.data.color || '#888',
+                botColor: msg.data.botColor || bot?.data.color || '#888',
                 text: msg.data.title || msg.data.content?.substring(0, 80),
                 content: msg.data.content || '',
                 time: new Date().toLocaleTimeString(),
@@ -1205,6 +1212,7 @@ export default function SimulationPage() {
       };
 
       ws.onclose = () => {
+        setWsConnected(false);
         if (disposed) return;
         console.log('🔴 Retrying ... signal');
         if (statusRef.current) {
@@ -1290,6 +1298,7 @@ export default function SimulationPage() {
         showFeed={showFeed}
         setShowFeed={setShowFeed}
         feedRef={feedRef}
+        isConnected={wsConnected}
       />
 
       {/* Bot Metrics Panel */}
@@ -1367,8 +1376,9 @@ export default function SimulationPage() {
         />
       )}
 
-      {/* Bot Types Legend */}
+      {/* Bot Types Legend — hidden on mobile */}
       <div
+        className="hidden md:flex"
         style={{
           position: 'absolute',
           top: '56px',
@@ -1380,7 +1390,6 @@ export default function SimulationPage() {
           zIndex: 10,
           fontFamily: "'Inter', system-ui, sans-serif",
           backdropFilter: 'blur(10px)',
-          display: 'flex',
           gap: '14px',
           alignItems: 'center',
         }}
@@ -1399,9 +1408,10 @@ export default function SimulationPage() {
         ))}
       </div>
 
-      {/* Controls hint */}
+      {/* Controls hint — hidden on mobile */}
       {/* View Controls Instructions - positioned left of detail panel */}
       <div
+        className="hidden md:block"
         style={{
           position: 'absolute',
           bottom: '20px',

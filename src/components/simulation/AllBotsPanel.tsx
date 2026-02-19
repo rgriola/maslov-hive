@@ -35,7 +35,7 @@ export const AllBotsPanel: React.FC<AllBotsPanelProps> = ({ uiTheme, bots, onClo
             top: '50%',
             left: '50%',
             transform: 'translate(-50%, -50%)',
-            width: '900px', // Wide panel for table
+            width: 'min(900px, 95vw)', // Responsive: cap at 95vw on mobile
             maxHeight: '80vh',
             background: uiTheme.panelBg,
             backdropFilter: 'blur(16px)',

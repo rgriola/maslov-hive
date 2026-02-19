@@ -1,11 +1,16 @@
 /**
  * Top status bar showing time, location, weather, and bot needs.
+ * Dev-only controls (speed, full reset) hidden in production.
  * Refactored: 2026-02-16 @ extraction from page.tsx
+ * Refactored: 2026-02-19 @ mobile responsiveness + hide dev controls in production
  */
 
 import { RefObject } from 'react';
 import type { WeatherData, SelectedBotInfo } from '@/types/simulation';
 import { getWeatherEmoji, getAQIColor } from '@/utils/weather';
+
+/** Whether we're in development mode (controls visible) */
+const isDev = process.env.NODE_ENV === 'development';
 
 export interface StatusBarProps {
   /** Current time (null during SSR) */
@@ -68,15 +73,17 @@ export function StatusBar({
         top: 0,
         left: 0,
         right: 0,
-        height: '48px',
+        minHeight: '48px',
         background: 'linear-gradient(180deg, rgba(10,10,26,0.95), rgba(10,10,26,0.6))',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'space-between',
-        padding: '0 24px',
+        padding: '0 12px',
         zIndex: 10,
         borderBottom: '1px solid rgba(74, 158, 255, 0.15)',
         fontFamily: "'Inter', system-ui, sans-serif",
+        flexWrap: 'wrap' as const,
+        gap: '4px',
       }}
     >
       {/* Left: Logo */}
@@ -88,7 +95,7 @@ export function StatusBar({
       </div>
 
       {/* Right: Controls */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' as const }}>
         {/* Date/Time */}
         <div style={{ fontSize: '12px', color: '#a0a0c0', fontFamily: 'monospace', textAlign: 'right' }}>
           <div>{currentTime?.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' }) ?? '—'}</div>
@@ -191,7 +198,8 @@ export function StatusBar({
           ⏳ Connecting...
         </div>
 
-        {/* Speed Controls */}
+        {/* Speed Controls — DEV ONLY */}
+        {isDev && (
         <div style={{
           display: 'flex',
           background: 'rgba(255, 255, 255, 0.05)',
@@ -220,8 +228,10 @@ export function StatusBar({
             </button>
           ))}
         </div>
+        )}
 
-        {/* Full Reset Button (Temporary) */}
+        {/* Full Reset Button — DEV ONLY */}
+        {isDev && (
         <button
           onClick={onFullReset}
           style={{
@@ -243,6 +253,7 @@ export function StatusBar({
         >
           <span>🚨</span> Full Reset
         </button>
+        )}
 
         {/* Dashboard Link */}
         <a

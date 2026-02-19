@@ -1,7 +1,9 @@
+'use client';
 /**
  * Visual configuration for bots in 3D scene.
  * Geometry and color are now randomized per-bot at spawn time.
  * Refactored: 2026-02-17 @ random geometry + color
+ * Refactored: 2026-02-19 @ added 'use client' for Turbopack Three.js resolution
  */
 
 import * as THREE from 'three';

@@ -44,7 +44,7 @@ export function BotMetricsPanel({
         position: 'absolute',
         top: '115px',
         left: showFeed ? '288px' : '8px',
-        width: '240px',
+        width: 'min(240px, calc(100vw - 24px))', // Responsive
         background: uiTheme.panelBg,
         border: `1px solid ${uiTheme.borderColor}`,
         borderRadius: '12px',

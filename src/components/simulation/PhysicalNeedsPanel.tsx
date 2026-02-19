@@ -5,6 +5,7 @@
 
 import type { UiTheme, SelectedBotInfo, BotNeeds } from '@/types/simulation';
 import { NeedsMeterWithIcon, NeedsGridCard } from './NeedsMeter';
+import { ensureContrastRatio } from '@/utils/color';
 
 export interface PhysicalNeedsPanelProps {
   /** UI theme for day/night styling */
@@ -61,6 +62,10 @@ export function PhysicalNeedsPanel({
   hasAirQuality,
   onClose,
 }: PhysicalNeedsPanelProps) {
+  const panelBgHex = uiTheme.panelBgHex || '#0d1117';
+  const botColorAdjusted = ensureContrastRatio(selectedBotInfo.color, panelBgHex, 3.0);
+  const botColorText = ensureContrastRatio(selectedBotInfo.color, panelBgHex, 4.5);
+
   return (
     <div
       style={{
@@ -70,6 +75,7 @@ export function PhysicalNeedsPanel({
         width: '320px',
         background: uiTheme.panelBg,
         border: `1px solid ${uiTheme.borderColor}`,
+        borderLeft: `5px solid ${botColorAdjusted}`,
         borderRadius: '12px',
         zIndex: 15,
         fontFamily: "'Inter', system-ui, sans-serif",
@@ -90,7 +96,7 @@ export function PhysicalNeedsPanel({
         }}>
           <div>
             <div style={{
-              color: uiTheme.textPrimary,
+              color: botColorText,
               fontSize: '20px',
               fontWeight: 800,
               lineHeight: 1.2,

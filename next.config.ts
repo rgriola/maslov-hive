@@ -1,7 +1,8 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  // Prevent Next.js from bundling Three.js server-side (browser-only WebGL library)
+  serverExternalPackages: ['three'],
 };
 
 export default nextConfig;

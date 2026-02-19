@@ -18,6 +18,7 @@ export async function GET(
             select: {
                 id: true,
                 name: true,
+                color: true,
                 personality: true,
                 blueskyHandle: true,
                 blueskyDid: true,

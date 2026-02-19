@@ -207,7 +207,7 @@ export interface ShelterData {
 
 // ─── Three.js Bot Entity ───────────────────────────────────────
 
-import * as THREE from 'three';
+import type * as THREE from 'three';
 
 export interface BotEntity {
   group: THREE.Group;

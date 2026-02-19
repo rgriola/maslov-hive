@@ -23,6 +23,8 @@ export interface ActivityFeedPanelProps {
   setShowFeed: (show: boolean) => void;
   /** Ref for the scrollable feed container */
   feedRef: RefObject<HTMLDivElement | null>;
+  /** Whether the WebSocket broadcast is connected */
+  isConnected?: boolean;
 }
 
 /**
@@ -37,6 +39,7 @@ export function ActivityFeedPanel({
   showFeed,
   setShowFeed,
   feedRef,
+  isConnected = false,
 }: ActivityFeedPanelProps) {
   // Feed toggle button when panel is hidden
   if (!showFeed) {
@@ -65,12 +68,13 @@ export function ActivityFeedPanel({
   }
 
   return (
+    <>
     <div
       style={{
         position: 'absolute',
         top: '48px',
         left: '0',
-        width: '280px',
+        width: 'min(280px, 85vw)', // Responsive: cap at 85vw on mobile
         bottom: '0',
         background: uiTheme.panelBg,
         borderRight: `1px solid ${uiTheme.borderColor}`,
@@ -90,8 +94,20 @@ export function ActivityFeedPanel({
         alignItems: 'center',
         justifyContent: 'space-between',
       }}>
-        <span style={{ color: uiTheme.textSecondary, fontSize: '11px', letterSpacing: '1px', textTransform: 'uppercase' as const }}>
-          💬 Activity
+        <span style={{ color: uiTheme.textSecondary, fontSize: '11px', letterSpacing: '1px', textTransform: 'uppercase' as const, display: 'flex', alignItems: 'center', gap: '6px' }}>
+          📡 Broadcast
+          {isConnected && (
+            <span style={{
+              fontSize: '9px',
+              fontWeight: 700,
+              color: '#fff',
+              background: '#ef4444',
+              padding: '1px 5px',
+              borderRadius: '3px',
+              letterSpacing: '0.5px',
+              animation: 'livePulse 2s ease-in-out infinite',
+            }}>LIVE</span>
+          )}
         </span>
         <button
           onClick={() => setShowFeed(false)}
@@ -117,8 +133,14 @@ export function ActivityFeedPanel({
         }}
       >
         {activityFeed.length === 0 && (
-          <div style={{ color: uiTheme.textSecondary, fontSize: '12px', textAlign: 'center' as const, marginTop: '20px' }}>
-            Bot posts will appear here...
+          <div style={{ color: uiTheme.textSecondary, fontSize: '12px', textAlign: 'center' as const, marginTop: '40px', padding: '0 16px' }}>
+            <div style={{ fontSize: '28px', marginBottom: '12px', animation: isConnected ? undefined : 'signalPulse 1.5s ease-in-out infinite' }}>📡</div>
+            <div style={{ fontWeight: 600, marginBottom: '4px', color: uiTheme.textPrimary }}>
+              {isConnected ? 'Listening for broadcasts...' : 'Tuning into broadcast...'}
+            </div>
+            <div style={{ fontSize: '11px', color: uiTheme.textMuted }}>
+              {isConnected ? 'Bot transmissions will appear here' : 'Searching for signal'}
+            </div>
           </div>
         )}
         {activityFeed.map(msg => (
@@ -178,5 +200,18 @@ export function ActivityFeedPanel({
         ))}
       </div>
     </div>
+
+    {/* Keyframe animations */}
+    <style>{`
+      @keyframes livePulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.5; }
+      }
+      @keyframes signalPulse {
+        0%, 100% { opacity: 0.4; transform: scale(1); }
+        50% { opacity: 1; transform: scale(1.1); }
+      }
+    `}</style>
+    </>
   );
 }

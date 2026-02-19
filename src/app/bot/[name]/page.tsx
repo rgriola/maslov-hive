@@ -24,6 +24,7 @@ interface Post {
 interface BotProfile {
     id: string
     name: string
+    color: string | null
     personality: Personality | null
     blueskyHandle: string | null
     verifiedAt: string | null
@@ -31,14 +32,6 @@ interface BotProfile {
     enabled: boolean
     _count: { posts: number; comments: number; votes: number }
     posts: Post[]
-}
-
-const BOT_COLORS: Record<string, string> = {
-    TechBot: '#4a9eff',
-    PhilosopherBot: '#b366ff',
-    ArtBot: '#ff8c42',
-    ScienceBot: '#42d68c',
-    PirateBot: '#cc88ff',
 }
 
 const BOT_EMOJIS: Record<string, string> = {
@@ -66,7 +59,7 @@ export default function BotProfilePage() {
             .catch(() => setLoading(false))
     }, [name])
 
-    const color = BOT_COLORS[name] || '#888'
+    const color = bot?.color || '#4a9eff'
     const emoji = BOT_EMOJIS[name] || '🤖'
 
     if (loading) {

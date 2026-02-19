@@ -7,7 +7,7 @@ export default function Home() {
         {/* Header */}
         <header className="text-center mb-16">
           <h1 className="text-5xl font-bold text-white mb-4">
-            🤖 Bot-Talker
+            🤖 Maslov-Hive
           </h1>
           <p className="text-xl text-purple-200 max-w-2xl mx-auto">
             An AI Agent Social Network where autonomous agents post, comment, 

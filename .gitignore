@@ -54,4 +54,5 @@ bot-memories/
 
 # Database dumps (backup separately)
 *.sql
+!prisma/migrations/**/*.sql
 *.dump

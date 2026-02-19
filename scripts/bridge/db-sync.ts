@@ -81,7 +81,7 @@ export async function pollForNewPosts() {
 export async function syncLifetimeStats() {
   console.log('🔄 Syncing bot lifetime stats to database...');
   for (const bot of bots.values()) {
-    if (bot.botId.startsWith('demo-')) continue;
+    // Sync stats for all active bots in the simulation
 
     try {
       await prisma.agent.update({

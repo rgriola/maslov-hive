@@ -1497,7 +1497,8 @@ export default function SimulationPage() {
       {/* Three.js canvas container */}
       <div ref={containerRef} style={{ width: '100%', height: '100%' }} />
 
-      <style>{`
+      <style dangerouslySetInnerHTML={{
+        __html: `
         .bot-label {
           position: absolute;
           top: 0;
@@ -1518,21 +1519,19 @@ export default function SimulationPage() {
           font-family: 'Inter', system-ui, sans-serif;
           font-size: 11px;
           color: #fff;
-          background: rgba(74, 158, 255, 0.15);
-          border: 1px solid rgba(74, 158, 255, 0.4);
-          border-radius: 8px;
-          padding: 6px 12px;
-          max-width: 200px;
-          white-space: nowrap;
-          overflow: hidden;
-          text-overflow: ellipsis;
+          padding: 6px 10px;
+          background: rgba(10, 10, 26, 0.95);
+          border: 1px solid rgba(74, 158, 255, 0.3);
+          border-radius: 12px;
+          box-shadow: 0 4px 15px rgba(0,0,0,0.4);
+          max-width: 180px;
           pointer-events: none;
-          backdrop-filter: blur(6px);
-          animation: fadeInBubble 0.3s ease;
+          z-index: 100;
+          animation: bubble-fade-in 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
         }
-        @keyframes fadeInBubble {
-          from { opacity: 0; transform: translate(-50%, -80%); }
-          to { opacity: 1; transform: translate(-50%, -100%); }
+        @keyframes bubble-fade-in {
+          0% { transform: scale(0.8) translateY(10px); opacity: 0; }
+          100% { transform: scale(1) translateY(0); opacity: 1; }
         }
         @keyframes fadeInMsg {
           from { opacity: 0; transform: translateY(-4px); }
@@ -1559,7 +1558,7 @@ export default function SimulationPage() {
         .activity-scroll::-webkit-scrollbar { width: 4px; }
         .activity-scroll::-webkit-scrollbar-track { background: transparent; }
         .activity-scroll::-webkit-scrollbar-thumb { background: rgba(74,158,255,0.2); border-radius: 2px; }
-      `}</style>
-    </div>
+      ` }} />
+    </div >
   );
 }

@@ -219,19 +219,20 @@ export function ActivityFeedPanel({
             </div>
           ))}
         </div>
-      </div >
+      </div>
 
       {/* Keyframe animations */}
-      < style > {`
-      @keyframes livePulse {
-        0%, 100% { opacity: 1; }
-        50% { opacity: 0.5; }
-      }
-      @keyframes signalPulse {
-        0%, 100% { opacity: 0.4; transform: scale(1); }
-        50% { opacity: 1; transform: scale(1.1); }
-      }
-    `}</style >
+      <style dangerouslySetInnerHTML={{
+        __html: `
+        @keyframes livePulse {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0.5; }
+        }
+        @keyframes signalPulse {
+          0%, 100% { opacity: 0.4; transform: scale(1); }
+          50% { opacity: 1; transform: scale(1.1); }
+        }
+      `}} />
     </>
   );
 }

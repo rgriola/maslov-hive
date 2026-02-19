@@ -18,7 +18,7 @@ import {
 import { BotState } from '../../src/types/simulation';
 import { BotAgent } from '../bot-agent-base';
 import { PrismaConnector } from '../connectors/prisma-connector';
-import { Personality } from '../config';
+import { Personality, PERSONAS } from '../config';
 
 import {
   prisma,
@@ -89,93 +89,55 @@ export async function initializeBots() {
     });
 
     if (agents.length === 0) {
-      console.log('⚠️  No enabled agents in DB. Spawning 5 default bots for demo...');
-      const defaults = [
-        { name: 'TechBot', personality: 'tech' },
-        { name: 'PhilosopherBot', personality: 'philo' },
-        { name: 'ArtBot', personality: 'art' },
-        { name: 'ScienceBot', personality: 'science' },
-        { name: 'PirateBot', personality: 'pirate' },
-      ];
-      for (const d of defaults) {
-        const angle = Math.random() * Math.PI * 2;
-        const dist = 3 + Math.random() * 8;
-        const bot: BotState = {
-          botId: `demo-${d.name}`,
-          botName: d.name,
-          personality: d.personality,
-          x: Math.cos(angle) * dist,
-          y: 0,
-          z: Math.sin(angle) * dist,
-          targetX: 0, targetY: 0, targetZ: 0,
-          state: 'idle',
-          width: randomBotWidth(),
-          height: randomBotHeight(),
-          color: random256Color(),
-          shape: randomBotShape(),
-          inventory: { wood: 0, stone: 0, water: 0, food: 0 },
-          needsPostTracker: createNeedsTracker(),
-          path: [],
-          pathIndex: 0,
-          lifetimeStats: createLifetimeStats(),
-        };
-        bot.targetX = bot.x;
-        bot.targetZ = bot.z;
+      console.error('');
+      console.error('❌ CRITICAL ERROR: No enabled agents found in the database.');
+      console.error('   The simulation requires real database agents to function.');
+      console.error('   Please ensure your database is seeded or register agents at /api/v1/agents/register');
+      console.error('');
+      throw new Error('Simulation failed to start: No agents found in database.');
+    }
 
-        bot.needs = initializeNeeds();
-        bot.needs.water -= Math.random() * 20;
-        bot.needs.food -= Math.random() * 20;
-        bot.needs.sleep -= Math.random() * 20;
-        bot.lastNeedUpdate = new Date();
-        console.log(`   💧 ${d.name} needs system enabled (randomized start)`);
+    // Spawn bots from DB at random positions
+    for (const agent of agents) {
+      const angle = Math.random() * Math.PI * 2;
+      const dist = 3 + Math.random() * 8;
+      const botColor = agent.color || random256Color();
+      const bot: BotState = {
+        botId: agent.id,
+        botName: agent.name,
+        personality: detectPersonality(agent.name),
+        x: Math.cos(angle) * dist,
+        y: 0,
+        z: Math.sin(angle) * dist,
+        targetX: Math.cos(angle) * dist, targetY: 0, targetZ: Math.sin(angle) * dist,
+        state: 'idle',
+        width: randomBotWidth(),
+        height: randomBotHeight(),
+        color: botColor,
+        shape: agent.name.includes('Pirate') ? 'cube' : randomBotShape(),
+        inventory: { wood: 0, stone: 0, water: 0, food: 0 },
+        needsPostTracker: createNeedsTracker(),
+        path: [],
+        pathIndex: 0,
+        lifetimeStats: createLifetimeStats(agent),
+      };
 
-        bots.set(bot.botId, bot);
+      // Persist color to DB if not already saved
+      if (!agent.color) {
+        prisma.agent
+          .update({ where: { id: agent.id }, data: { color: botColor } })
+          .then(() => console.log(`   🎨 ${agent.name} color saved: ${botColor}`))
+          .catch((err: unknown) => console.error(`   ⚠️ Failed to save color for ${agent.name}:`, err));
       }
-    } else {
-      // Spawn bots from DB at random positions
-      for (const agent of agents) {
-        const angle = Math.random() * Math.PI * 2;
-        const dist = 3 + Math.random() * 8;
-        const botColor = agent.color || random256Color();
-        const bot: BotState = {
-          botId: agent.id,
-          botName: agent.name,
-          personality: detectPersonality(agent.name),
-          x: Math.cos(angle) * dist,
-          y: 0,
-          z: Math.sin(angle) * dist,
-          targetX: Math.cos(angle) * dist, targetY: 0, targetZ: Math.sin(angle) * dist,
-          state: 'idle',
-          width: randomBotWidth(),
-          height: randomBotHeight(),
-          color: botColor,
-          shape: randomBotShape(),
-          inventory: { wood: 0, stone: 0, water: 0, food: 0 },
-          needsPostTracker: createNeedsTracker(),
-          path: [],
-          pathIndex: 0,
-          lifetimeStats: createLifetimeStats(agent),
-        };
-        bot.targetX = bot.x;
-        bot.targetZ = bot.z;
 
-        // Persist color to DB if not already saved
-        if (!agent.color) {
-          prisma.agent
-            .update({ where: { id: agent.id }, data: { color: botColor } })
-            .then(() => console.log(`   🎨 ${agent.name} color saved: ${botColor}`))
-            .catch((err: unknown) => console.error(`   ⚠️ Failed to save color for ${agent.name}:`, err));
-        }
+      bot.needs = initializeNeeds();
+      bot.needs.water -= Math.random() * 20;
+      bot.needs.food -= Math.random() * 20;
+      bot.needs.sleep -= Math.random() * 20;
+      bot.lastNeedUpdate = new Date();
+      console.log(`   💧 ${agent.name} needs system enabled (randomized start)`);
 
-        bot.needs = initializeNeeds();
-        bot.needs.water -= Math.random() * 20;
-        bot.needs.food -= Math.random() * 20;
-        bot.needs.sleep -= Math.random() * 20;
-        bot.lastNeedUpdate = new Date();
-        console.log(`   💧 ${agent.name} needs system enabled (randomized start)`);
-
-        bots.set(bot.botId, bot);
-      }
+      bots.set(bot.botId, bot);
     }
 
     worldConfig.botCount = bots.size;
@@ -246,80 +208,52 @@ export async function initializeBots() {
     for (const bot of bots.values()) {
       console.log(`   🤖 ${bot.botName} (${bot.personality}) ${bot.color} ${bot.width.toFixed(2)}×${bot.height.toFixed(2)}m at (${bot.x.toFixed(1)}, ${bot.z.toFixed(1)})`);
     }
-  } catch (error) {
-    console.error('❌ Failed to load agents from DB:', error);
-    console.log('   Continuing with demo bots...');
-    // Fallback: spawn demo bots without DB
-    const defaults = ['TechBot', 'PhilosopherBot', 'ArtBot', 'ScienceBot', 'PirateBot'];
-    for (const name of defaults) {
-      const angle = Math.random() * Math.PI * 2;
-      const dist = 3 + Math.random() * 8;
-      const bot: BotState = {
-        botId: `demo-${name}`,
-        botName: name,
-        personality: detectPersonality(name),
-        x: Math.cos(angle) * dist,
-        y: 0,
-        z: Math.sin(angle) * dist,
-        targetX: 0, targetY: 0, targetZ: 0,
-        state: 'idle',
-        width: randomBotWidth(),
-        height: randomBotHeight(),
-        color: random256Color(),
-        shape: randomBotShape(),
-        inventory: { wood: 0, stone: 0, water: 0, food: 0 },
-        needsPostTracker: createNeedsTracker(),
-        path: [],
-        pathIndex: 0,
-        lifetimeStats: createLifetimeStats(),
-      };
-      bot.targetX = bot.x;
-      bot.targetZ = bot.z;
-      bots.set(bot.botId, bot);
-    }
-    worldConfig.botCount = bots.size;
-    worldConfig.groundRadius = Math.round(Math.sqrt(bots.size * SQ_METERS_PER_BOT) / 2);
-  }
 
-  // ─── Initialize AI Agents (Content Generation) ─────────────────
-  if (ENABLE_AI_AGENTS) {
-    console.log('');
-    console.log('🤖 AI Agents: ENABLED');
-    console.log('   Initializing content generation for bots with personality data...');
+    // ─── Initialize AI Agents (Content Generation) ─────────────────
+    if (ENABLE_AI_AGENTS) {
+      console.log('');
+      console.log('🤖 AI Agents: ENABLED');
+      console.log('   Initializing content generation for bots with personality data...');
 
-    agentInstances.clear();
-    bridgeState.agentConnector = new PrismaConnector(prisma);
+      agentInstances.clear();
+      bridgeState.agentConnector = new PrismaConnector(prisma);
 
-    const allEnabledAgents = await prisma.agent.findMany({ where: { enabled: true } });
-    const agentsWithPersonality = allEnabledAgents.filter((a: Agent) => a.personality !== null);
+      const allEnabledAgents = await prisma.agent.findMany({ where: { enabled: true } });
+      const agentsWithPersonality = allEnabledAgents.filter((a: Agent) => a.personality !== null);
 
-    for (const agent of agentsWithPersonality) {
-      try {
-        const personality = agent.personality as unknown as Personality;
-        if (!personality || !personality.name) {
-          console.log(`   ⚠️ ${agent.name}: Invalid personality data, skipping AI`);
-          continue;
+      for (const agent of agentsWithPersonality) {
+        try {
+          const personality = agent.personality as unknown as Personality;
+          if (!personality || !personality.name) {
+            console.log(`   ⚠️ ${agent.name}: Invalid personality data, skipping AI`);
+            continue;
+          }
+
+          const botAgent = new BotAgent(
+            { name: agent.name, personality },
+            bridgeState.agentConnector
+          );
+
+          agentInstances.set(agent.id, botAgent);
+          console.log(`   ✅ ${agent.name}: AI agent ready (interval: ${personality.postFrequency || 60000}ms)`);
+        } catch (error) {
+          console.log(`   ❌ ${agent.name}: Failed to initialize AI agent: ${error}`);
         }
-
-        const botAgent = new BotAgent(
-          { name: agent.name, personality },
-          bridgeState.agentConnector
-        );
-
-        agentInstances.set(agent.id, botAgent);
-        console.log(`   ✅ ${agent.name}: AI agent ready (interval: ${personality.postFrequency || 60000}ms)`);
-      } catch (error) {
-        console.log(`   ❌ ${agent.name}: Failed to initialize AI agent: ${error}`);
       }
-    }
 
-    console.log(`   📊 ${agentInstances.size}/${bots.size} bots have AI content generation`);
+      console.log(`   📊 ${agentInstances.size}/${bots.size} bots have AI content generation`);
 
-    if (agentInstances.size > 0) {
-      startAgentHeartbeats();
+      if (agentInstances.size > 0) {
+        startAgentHeartbeats();
+      }
+    } else {
+      console.log('');
+      console.log('🤖 AI Agents: DISABLED (set ENABLE_AI_AGENTS=true to enable)');
     }
-  } else {
-    console.log('');
-    console.log('🤖 AI Agents: DISABLED (set ENABLE_AI_AGENTS=true to enable)');
+  } catch (error) {
+    console.error('❌ CRITICAL ERROR: Database initialization failed!');
+    console.error(`   Error details: ${error}`);
+    console.error('   Please verify DATABASE_URL and ensure the database is accessible.');
+    throw error;
   }
 }

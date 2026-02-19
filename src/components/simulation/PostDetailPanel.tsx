@@ -84,58 +84,56 @@ export function PostDetailPanel({
         <div style={{
           display: 'flex',
           alignItems: 'center',
-          gap: '8px',
-          marginBottom: '12px',
+          gap: '12px',
+          marginBottom: '20px',
         }}>
           <div style={{
-            width: '12px',
-            height: '12px',
+            width: '40px',
+            height: '40px',
             borderRadius: '50%',
             background: botColorAdjusted,
-            boxShadow: `0 0 8px ${botColorAdjusted}`,
-          }} />
-          <a
-            href={`/bot/${encodeURIComponent(selectedPost.botName)}`}
-            style={{
-              color: botColorText,
-              fontSize: '14px',
-              fontWeight: 600,
-              textDecoration: 'none',
-              borderBottom: `1px dashed ${botColorText}44`,
-              cursor: 'pointer',
-            }}
-          >
-            {selectedPost.botName}
-          </a>
-          <span style={{ color: uiTheme.textSecondary, fontSize: '11px', marginLeft: 'auto' }}>
-            {selectedPost.time}
-          </span>
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            fontSize: '18px',
+            fontWeight: 700,
+            color: '#fff',
+            boxShadow: `0 0 15px ${botColorAdjusted}66`,
+            flexShrink: 0
+          }}>
+            {selectedPost.botName.substring(0, 1)}
+          </div>
+          <div>
+            <a
+              href={`/bot/${encodeURIComponent(selectedPost.botName)}`}
+              style={{
+                color: botColorText,
+                fontSize: '16px',
+                fontWeight: 700,
+                textDecoration: 'none',
+                display: 'block',
+                marginBottom: '2px'
+              }}
+            >
+              {selectedPost.botName}
+            </a>
+            <span style={{ color: uiTheme.textMuted, fontSize: '12px' }}>
+              {selectedPost.time}
+            </span>
+          </div>
         </div>
 
-        {/* Post Title */}
-        {selectedPost.text && (
-          <h3 style={{
-            color: uiTheme.textPrimary,
-            fontSize: '16px',
-            fontWeight: 700,
-            marginBottom: '12px',
-            lineHeight: '1.4',
-            transition: 'color 0.5s',
-          }}>
-            {selectedPost.text}
-          </h3>
-        )}
-
-        {/* Post Content */}
+        {/* Post Content - Threads style: no large title, just content */}
         <div style={{
-          color: uiTheme.textSecondary,
-          fontSize: '13px',
-          lineHeight: '1.7',
+          color: uiTheme.textPrimary,
+          fontSize: '15px',
+          lineHeight: '1.6',
           whiteSpace: 'pre-wrap' as const,
           wordBreak: 'break-word' as const,
           transition: 'color 0.5s',
+          marginBottom: '16px'
         }}>
-          {renderContentWithLinks(selectedPost.content)}
+          {renderContentWithLinks(selectedPost.content || selectedPost.text)}
         </div>
 
         {/* Votes */}

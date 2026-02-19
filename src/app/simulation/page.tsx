@@ -396,6 +396,7 @@ export default function SimulationPage() {
       }
       entity.label.remove();
       entity.speechBubble.remove();
+      entity.urgentNeedLabel.remove();
     }
     botsRef.current.clear();
 
@@ -813,7 +814,7 @@ export default function SimulationPage() {
         const x = (pos.x * 0.5 + 0.5) * container!.clientWidth;
         const y = (-pos.y * 0.5 + 0.5) * container!.clientHeight;
 
-        if (pos.z < 1 && !entity.data.isInside) {
+        if (pos.z < 1 && !entity.data.isInside && entity.label.parentElement) {
           entity.label.style.transform = `translate(-50%, -100%) translate(${x}px, ${y}px)`;
           entity.label.style.display = 'block';
           entity.speechBubble.style.transform = `translate(-50%, -100%) translate(${x}px, ${y - 30}px)`;
@@ -826,7 +827,7 @@ export default function SimulationPage() {
           } else {
             entity.urgentNeedLabel.style.display = 'none';
           }
-        } else {
+        } else if (entity.label.parentElement) {
           entity.label.style.display = 'none';
           entity.speechBubble.style.display = 'none';
           entity.urgentNeedLabel.style.display = 'none';

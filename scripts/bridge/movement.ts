@@ -689,7 +689,14 @@ export function simulateMovement() {
           bot.path = [];
           bot.pathIndex = 0;
           bot.state = 'seeking-shelter';
-          broadcastNeedsPost(bot, 'cold');
+
+          // Only broadcast cold every 15s to bridge, which then applies 120s cooldown for actual posts
+          const nowTime = Date.now();
+          const lastColdPost = (bot as any).lastColdCheckTime || 0;
+          if (nowTime - lastColdPost > 15000) {
+            broadcastNeedsPost(bot, 'cold');
+            (bot as any).lastColdCheckTime = nowTime;
+          }
           console.log(`🥶 ${bot.botName} is cold (clothing: ${bot.needs.clothing.toFixed(0)}) — heading to shelter`);
         }
       }

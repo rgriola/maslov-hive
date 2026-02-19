@@ -340,11 +340,11 @@ export async function broadcastNeedsPost(
       }
       tracker.critical = true;
     } else if (level === 'activity') {
-      // Add a cooldown for generic activity posts (e.g. "cold", "drinking")
-      // Only post every 30 seconds for the same activity
+      // Add a cooldown for generic activity posts (e.g. "cold", "drinking", "building")
+      // Only post every 120 seconds for the same activity to prevent feed flood
       const now = Date.now();
       const lastTime = (tracker as any).lastActivityTime || 0;
-      if (now - lastTime < 30000) {
+      if (now - lastTime < 120000) {
         return;
       }
       (tracker as any).lastActivityTime = now;

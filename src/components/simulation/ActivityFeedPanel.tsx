@@ -163,54 +163,59 @@ export function ActivityFeedPanel({
               key={msg.id}
               onClick={() => selectPost(msg)}
               style={{
-                padding: '8px 10px',
-                marginBottom: '6px',
+                padding: '12px',
+                marginBottom: '8px',
                 background: selectedPost?.id === msg.id ? uiTheme.cardBgHover : uiTheme.cardBg,
-                borderRadius: '8px',
-                borderLeft: `4px solid ${ensureContrastRatio(msg.botColor, uiTheme.panelBgHex, 3.0)}`,
+                borderRadius: '12px',
                 animation: 'fadeInMsg 0.3s ease',
                 cursor: 'pointer',
-                transition: 'background 0.15s',
+                transition: 'all 0.2s',
+                display: 'flex',
+                gap: '12px',
+                border: selectedPost?.id === msg.id ? `1px solid ${ensureContrastRatio(msg.botColor, uiTheme.panelBgHex, 3.0)}` : '1px solid transparent',
               }}
             >
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
-                <span style={{ color: ensureContrastRatio(msg.botColor, uiTheme.panelBgHex, 4.5), fontSize: '11px', fontWeight: 600 }}>
-                  {msg.botName}
-                </span>
-                <span style={{ color: uiTheme.textSecondary, fontSize: '10px' }}>
-                  {msg.time}
-                </span>
-              </div>
+              {/* Avatar Circle */}
               <div style={{
-                color: uiTheme.textPrimary,
-                fontSize: '12px',
-                lineHeight: '1.4',
-                wordBreak: 'break-word' as const,
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap' as const,
-                transition: 'color 0.5s',
-                fontWeight: 600,
+                width: '32px',
+                height: '32px',
+                borderRadius: '50%',
+                background: ensureContrastRatio(msg.botColor, uiTheme.panelBgHex, 3.0),
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: '16px',
+                flexShrink: 0,
+                boxShadow: `0 2px 8px ${msg.botColor}44`,
               }}>
-                {msg.text}
+                {msg.botName.substring(0, 1)}
               </div>
-              {/* Content preview with citations */}
-              {msg.content && (
+
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                  <span style={{ color: uiTheme.textPrimary, fontSize: '13px', fontWeight: 700 }}>
+                    {msg.botName}
+                  </span>
+                  <span style={{ color: uiTheme.textMuted, fontSize: '11px' }}>
+                    {msg.time}
+                  </span>
+                </div>
+
+                {/* Content - Threads style: no title, just content */}
                 <div style={{
                   color: uiTheme.textSecondary,
-                  fontSize: '11px',
-                  lineHeight: '1.4',
-                  marginTop: '4px',
+                  fontSize: '13px',
+                  lineHeight: '1.5',
                   wordBreak: 'break-word' as const,
                   display: '-webkit-box',
-                  WebkitLineClamp: 2,
+                  WebkitLineClamp: 3,
                   WebkitBoxOrient: 'vertical' as const,
                   overflow: 'hidden',
                   transition: 'color 0.5s',
                 }}>
-                  {renderContentWithLinks(msg.content.length > 150 ? msg.content.substring(0, 150) + '...' : msg.content)}
+                  {renderContentWithLinks(msg.content || msg.text)}
                 </div>
-              )}
+              </div>
             </div>
           ))}
         </div>

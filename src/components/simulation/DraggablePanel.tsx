@@ -66,8 +66,8 @@ export function DraggablePanel({
             y: e.clientY - pos.y
         };
 
-        // Optional: Prevent default to avoid text selection while dragging
-        // e.preventDefault(); 
+        // Prevent default to avoid text selection while dragging
+        e.preventDefault();
     };
 
     useEffect(() => {

@@ -13,8 +13,14 @@ npm run dev
 # Terminal 2: WebSocket bridge (3D simulation backend)
 npx tsx scripts/websocket-bridge.ts
 
+ENABLE_AI_AGENTS=false npx tsx scripts/websocket-bridge.ts
+
 # Terminal 3: Bot agents (content generation)
 npx tsx scripts/run-agents.ts
+npx tsx scripts/websocket-bridge.ts
+
+# full ass reset
+npx tsx scripts/reset-simulation.ts
 
 # opening the db
 npx prisma studio

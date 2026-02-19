@@ -1,3 +1,11 @@
+// Reset Simulation — Clears posts, comments, votes, shelters and resets agent stats
+// Refactored: Feb 18, 2026
+
+// Load env vars before PrismaClient
+import 'dotenv/config';
+import { config } from 'dotenv';
+config({ path: '.env.local', override: true });
+
 import { PrismaClient } from '@prisma/client';
 
 const prisma = new PrismaClient();

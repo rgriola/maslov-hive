@@ -31,7 +31,15 @@ import {
   isWalkable
 } from '@/lib/world-physics';
 
+// AI Agent imports (for integrated content generation)
+import { BotAgent } from './bot-agent-base';
+import { PrismaConnector } from './connectors/prisma-connector';
+import { Personality } from './config';
+
 const prisma = new PrismaClient();
+
+// AI Agent control — set to false to disable Gemini API calls (saves credits during testing)
+const ENABLE_AI_AGENTS = process.env.ENABLE_AI_AGENTS !== 'false';
 const PORT = parseInt(process.env.PORT || '8080', 10);
 const wss = new WebSocketServer({ port: PORT });
 
@@ -47,6 +55,11 @@ const bots = new Map<string, BotState>();
 const clients = new Set<WebSocket>();
 const pardonCooldowns = new Map<string, number>(); // pairKey → last pardon timestamp
 const greetingTimestamps = new Map<string, number[]>(); // botId → timestamps of greeting posts
+
+// AI Agent instances (for content generation)
+const agentInstances = new Map<string, BotAgent>();
+let agentConnector: PrismaConnector | null = null;
+
 let worldConfig: WorldConfig = {
   groundRadius: 15,
   botCount: 0,
@@ -420,6 +433,129 @@ async function initializeBots() {
     worldConfig.botCount = bots.size;
     // Fallback ground size (side = sqrt(4 * 75) ≈ 17m)
     worldConfig.groundRadius = Math.round(Math.sqrt(bots.size * SQ_METERS_PER_BOT) / 2);
+  }
+
+  // ─── Initialize AI Agents (Content Generation) ──────────────────
+  if (ENABLE_AI_AGENTS) {
+    console.log('');
+    console.log('🤖 AI Agents: ENABLED');
+    console.log('   Initializing content generation for bots with personality data...');
+
+    // Clear any existing agent instances
+    agentInstances.clear();
+
+    // Create shared connector
+    agentConnector = new PrismaConnector(prisma);
+
+    // Load agents with personality data for AI content generation
+    const agentsWithPersonality = await prisma.agent.findMany({
+      where: {
+        enabled: true,
+        personality: { not: null }
+      }
+    });
+
+    for (const agent of agentsWithPersonality) {
+      try {
+        const personality = agent.personality as unknown as Personality;
+        if (!personality || !personality.name) {
+          console.log(`   ⚠️ ${agent.name}: Invalid personality data, skipping AI`);
+          continue;
+        }
+
+        const botAgent = new BotAgent({
+          name: agent.name,
+          personality: personality
+        }, agentConnector);
+
+        agentInstances.set(agent.id, botAgent);
+        console.log(`   ✅ ${agent.name}: AI agent ready (interval: ${personality.postFrequency || 60000}ms)`);
+      } catch (error) {
+        console.log(`   ❌ ${agent.name}: Failed to initialize AI agent: ${error}`);
+      }
+    }
+
+    console.log(`   📊 ${agentInstances.size}/${bots.size} bots have AI content generation`);
+
+    // Start AI agent heartbeats
+    if (agentInstances.size > 0) {
+      startAgentHeartbeats();
+    }
+  } else {
+    console.log('');
+    console.log('🤖 AI Agents: DISABLED (set ENABLE_AI_AGENTS=true to enable)');
+  }
+}
+
+// ─── AI Agent Content Generation ────────────────────────────────
+
+/** Map to track last heartbeat time per agent */
+const agentLastHeartbeat = new Map<string, number>();
+
+/** Start the AI agent heartbeats (posts, comments, votes via Gemini) */
+function startAgentHeartbeats() {
+  console.log('');
+  console.log('💓 Starting AI agent heartbeats...');
+
+  // Run each agent's heartbeat on their own schedule
+  for (const [agentId, botAgent] of agentInstances) {
+    const bot = bots.get(agentId);
+    if (!bot) continue;
+
+    // Get personality from the agent to find the interval
+    const personality = (botAgent as any).config?.personality as Personality | undefined;
+    const interval = personality?.postFrequency || 60000;
+
+    // Initialize last heartbeat time (stagger starts)
+    agentLastHeartbeat.set(agentId, Date.now() + Math.random() * 10000);
+
+    console.log(`   💓 ${bot.botName}: Heartbeat every ~${Math.round(interval / 1000)}s`);
+  }
+
+  // Single interval to check all agents
+  setInterval(() => {
+    const now = Date.now();
+
+    for (const [agentId, botAgent] of agentInstances) {
+      const lastTime = agentLastHeartbeat.get(agentId) || 0;
+      const personality = (botAgent as any).config?.personality as Personality | undefined;
+      const interval = personality?.postFrequency || 60000;
+
+      // Add jitter (±10s) to prevent synchronization
+      const jitter = (Math.random() - 0.5) * 20000;
+      const effectiveInterval = interval + jitter;
+
+      if (now - lastTime > effectiveInterval) {
+        // Update timestamp before running to prevent overlapping heartbeats
+        agentLastHeartbeat.set(agentId, now);
+
+        // Run heartbeat async (don't block the interval)
+        runAgentHeartbeat(agentId, botAgent).catch(err => {
+          const bot = bots.get(agentId);
+          console.error(`❌ [${bot?.botName || agentId}] Heartbeat error:`, err);
+        });
+      }
+    }
+  }, 5000); // Check every 5 seconds
+}
+
+/** Run a single agent's heartbeat (async) */
+async function runAgentHeartbeat(agentId: string, botAgent: BotAgent) {
+  const bot = bots.get(agentId);
+  if (!bot) return;
+
+  console.log(`💓 [${bot.botName}] AI heartbeat starting...`);
+
+  try {
+    // Call the agent's heartbeat method which handles:
+    // - Fetching feed
+    // - Commenting on posts
+    // - Voting on posts
+    // - Creating new posts (with web search/Gemini)
+    await botAgent.heartbeat();
+    console.log(`💓 [${bot.botName}] AI heartbeat complete`);
+  } catch (error) {
+    console.error(`❌ [${bot.botName}] AI heartbeat failed:`, error);
   }
 }
 

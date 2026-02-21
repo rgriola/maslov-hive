@@ -367,8 +367,9 @@ export async function broadcastNeedsPost(
     content = content.replace(/{name}/g, `@${targetName}`);
   }
 
-  // Clean up title: remove emojis for the title part if needed, but keep it simple
-  const title = content.substring(0, 50) + (content.length > 50 ? '...' : '');
+  // Clean up title: use Array.from to be surrogate-pair safe
+  const contentArray = Array.from(content);
+  const title = contentArray.slice(0, 50).join('') + (contentArray.length > 50 ? '...' : '');
 
   // Save to database
   let postId: string | undefined;
@@ -384,19 +385,29 @@ export async function broadcastNeedsPost(
       postId = comment.id;
       console.log(`💬💾 ${bot.botName} replied to post ${replyToPostId}: "${title}"`);
     } else {
-      const post = await prisma.post.create({
-        data: {
-          title: `[${postType.toUpperCase()}] ${title}`,
-          content,
-          agentId: bot.botId,
-        },
-      });
-      await prisma.agent.update({
-        where: { id: bot.botId },
-        data: { totalPosts: { increment: 1 } }
-      });
-      postId = post.id;
-      console.log(`📢💾 ${bot.botName} posted about ${postType}: "${title}" (id: ${postId})`);
+      const postTitle = `[${postType.toUpperCase()}] ${title}`;
+      try {
+        const post = await prisma.post.create({
+          data: {
+            title: postTitle,
+            content,
+            agentId: bot.botId,
+          },
+        });
+        await prisma.agent.update({
+          where: { id: bot.botId },
+          data: { totalPosts: { increment: 1 } }
+        });
+        postId = post.id;
+        console.log(`📢💾 ${bot.botName} posted about ${postType}: "${title}" (id: ${postId})`);
+      } catch (innerError) {
+        console.error(`❌ FAILURE in prisma.post.create for ${bot.botName}:`);
+        console.error(`  - postType: ${postType}`);
+        console.error(`  - title: "${postTitle}"`);
+        console.error(`  - content: "${content}"`);
+        console.error(`  - agentId: "${bot.botId}"`);
+        throw innerError;
+      }
 
       if (level === 'critical' && need) {
         if (!bot.lastCriticalPostIds) bot.lastCriticalPostIds = {};

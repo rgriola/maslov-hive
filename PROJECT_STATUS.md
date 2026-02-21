@@ -1,6 +1,6 @@
 # Maslov Hive — Project Status
 
-> **Last updated:** February 19, 2026 (Evening)
+> **Last updated:** February 21, 2026 (Evening)
 
 ## Overview
 
@@ -196,20 +196,16 @@ Then open:
 | `scripts/setup-test-agents.ts` | Seed 4 test agents into DB |
 | `scripts/start-dev.sh` | Docker + Prisma + Next.js startup |
 
-## Bridge Modules (Refactored Feb 19, 2026)
-
-The WebSocket bridge was refactored from a **~2,400-line monolith** into 9 modular files under `scripts/bridge/`:
-
-| Module | Purpose |
-|--------|---------|
-| `scripts/bridge/state.ts` | Centralized mutable state: Prisma client, bot map, client set, world config, constants |
-| `scripts/bridge/agents.ts` | AI agent heartbeat scheduling — staggered intervals per agent with jitter |
-| `scripts/bridge/bot-init.ts` | Bot initialization from DB (or demo fallback), resource placement, shelter loading, AI agent setup |
-| `scripts/bridge/movement.ts` | Core simulation tick: needs decay, A* pathfinding, collision avoidance, resource gathering, shelter building, social behaviors, weather modifiers |
+| `scripts/bridge/movement.ts` | Simulation entry point — orchestrates core engines (80 lines) |
+| `scripts/bridge/agents/metabolism.ts` | **Metabolism Engine**: Life support, needs decay/recovery, environmental health |
+| `scripts/bridge/agents/brain.ts` | **Brain Engine**: Cognitive FSM, decision making, state transitions, goal evaluation |
+| `scripts/bridge/agents/behavior-handlers.ts` | **Behavior Handlers**: "Ticked Operation" pattern for duration-based activities |
+| `scripts/bridge/physics/solver.ts` | **Physics Solver**: Movement execution, spatial-partitioned collision resolution |
+| `scripts/bridge/physics/navigation.ts` | **Navigation Utils**: Pathfinding helpers, target picking, build spot validation |
+| `scripts/bridge/physics/geometries.ts` | **Geometry Utils**: Structure collision definitions (Sundial, Shelters) |
 | `scripts/bridge/needs-posts.ts` | Needs-based posting system with message templates for all states |
-| `scripts/bridge/broadcast.ts` | WebSocket broadcasting: positions, world init, bot extras (urgent need emoji, nearby awareness) |
-| `scripts/bridge/db-sync.ts` | Post polling + broadcast, lifetime stats persistence (every 5 min), DB cleanup (prune posts >12h, max 100) |
-| `scripts/bridge/helpers.ts` | Factory functions: `createNeedsTracker()`, `createLifetimeStats()` |
+| `scripts/bridge/broadcast.ts` | WebSocket broadcasting: positions, world init, bot extras |
+| `scripts/bridge/db-sync.ts` | Post polling + broadcast, lifetime stats persistence, DB cleanup |
 | `scripts/bridge/weather.ts` | Weather fetching, temperature & AQI modifiers |
 | `scripts/bridge/index.ts` | Barrel re-export of all modules |
 
@@ -269,11 +265,11 @@ All project documentation has been organized into the `/docs` folder:
 - [x] Full world reset functionality
 - [x] Lifetime metrics tracking
 - [x] AI agents merged into WebSocket bridge (single process)
-- [x] Bridge refactor into modular architecture
-- [x] Bot color persistence to database
-- [x] Production deployment (Vercel + Neon Postgres + Render)
-- [x] Project renamed from Bot-Talker to Maslov-Hive
-- [x] PirateBot fully integrated (5 total bots)
+- [x] Bridge refactor into modular architecture (v1: Feb 19, v2: Feb 21)
+- [x] Movement Simulation Refactor (Metabolism, Brain, Physics separation)
+- [x] "Ticked Operation" pattern implementation (safe async simulation)
+- [x] Spatial Partitioning for O(N) collision detection
+- [x] Delta-time (dt) standardized scaling for all engines
 - [ ] Unity 3D client integration (websocket-based)
 - [ ] More bot personalities (Art/Science/Philo/Tech expanded)
 - [ ] Bot-to-bot conversations (deeper threading)

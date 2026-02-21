@@ -42,7 +42,7 @@ export function BotMetricsPanel({
     <div
       style={{
         position: 'relative',
-        width: 'min(240px, calc(100vw - 24px))', // Responsive
+        width: 'min(300px, calc(100vw - 24px))', // Responsive
         background: uiTheme.panelBg,
         border: `1px solid ${uiTheme.borderColor}`,
         borderRadius: '12px',
@@ -53,6 +53,7 @@ export function BotMetricsPanel({
         transition: 'background 0.5s, border-color 0.5s',
         maxHeight: 'calc(100vh - 130px)',
         overflowY: 'auto',
+        boxSizing: 'border-box',
       }}
     >
       {/* Header */}
@@ -97,12 +98,28 @@ export function BotMetricsPanel({
         <span style={{ fontSize: '28px', lineHeight: 1 }}>
           {meta.emoji}
         </span>
-        <div>
-          <div style={{ color: botColorText, fontWeight: 600, fontSize: '15px', marginBottom: '1px' }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{
+            color: botColorText,
+            fontWeight: 600,
+            fontSize: '15px',
+            marginBottom: '1px',
+            whiteSpace: 'nowrap',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis'
+          }}>
             {selectedBotInfo.botName}
           </div>
-          <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
-            <div style={{ color: uiTheme.textSecondary, fontSize: '10px', textTransform: 'capitalize' as const }}>
+          <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'nowrap', minWidth: 0 }}>
+            <div style={{
+              color: uiTheme.textSecondary,
+              fontSize: '10px',
+              textTransform: 'capitalize' as const,
+              whiteSpace: 'nowrap',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              flexShrink: 1
+            }}>
               {selectedBotInfo.personality}
             </div>
             <div style={{ width: '3px', height: '3px', borderRadius: '50%', background: uiTheme.textMuted, opacity: 0.5 }} />
@@ -112,7 +129,8 @@ export function BotMetricsPanel({
               fontWeight: 600,
               background: 'rgba(74, 222, 128, 0.1)',
               padding: '1px 5px',
-              borderRadius: '4px'
+              borderRadius: '4px',
+              flexShrink: 0
             }}>
               {(() => {
                 if (!selectedBotInfo.spawnDate) return 'Newborn';
@@ -174,7 +192,7 @@ export function BotMetricsPanel({
           textAlign: 'center' as const,
         }}>
           <div style={{ color: '#ff9800', fontSize: '15px', fontWeight: 700, marginBottom: '4px' }}>
-            {selectedBotInfo.height ? `${selectedBotInfo.height.toFixed(2)}m` : '—'}
+            {selectedBotInfo.height ? `${Math.round(selectedBotInfo.height * 100)}cm` : '—'}
           </div>
           <div style={{ color: uiTheme.textSecondary, fontSize: '9px', textTransform: 'uppercase' as const, letterSpacing: '0.5px' }}>
             Height
@@ -188,10 +206,13 @@ export function BotMetricsPanel({
         }}>
           <div style={{
             color: selectedBotInfo.state === 'posting' ? '#fbbf24' : '#4caf50',
-            fontSize: '12px',
-            fontWeight: 600,
+            fontSize: '11px',
+            fontWeight: 800,
             textTransform: 'capitalize' as const,
             marginBottom: '4px',
+            whiteSpace: 'nowrap',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis'
           }}>
             {selectedBotInfo.state || 'idle'}
           </div>
@@ -280,6 +301,10 @@ export function BotMetricsPanel({
                   color: uiTheme.textPrimary,
                   fontSize: '12px',
                   fontWeight: 500,
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  maxWidth: '100px'
                 }}>
                   {nearby.botName}
                 </span>
@@ -320,9 +345,16 @@ function MetricItem({ label, value, emoji, uiTheme }: { label: string, value: nu
       background: 'rgba(255,255,255,0.02)',
       borderRadius: '6px',
     }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '4px', marginBottom: '2px' }}>
-        <span style={{ fontSize: '10px' }}>{emoji}</span>
-        <span style={{ color: uiTheme.textMuted, fontSize: '9px', fontWeight: 500 }}>{label}</span>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '4px', marginBottom: '2px', minWidth: 0 }}>
+        <span style={{ fontSize: '10px', flexShrink: 0 }}>{emoji}</span>
+        <span style={{
+          color: uiTheme.textMuted,
+          fontSize: '9px',
+          fontWeight: 500,
+          whiteSpace: 'nowrap',
+          overflow: 'hidden',
+          textOverflow: 'ellipsis'
+        }}>{label}</span>
       </div>
       <div style={{ color: uiTheme.textPrimary, fontSize: '12px', fontWeight: 700 }}>
         {value || 0}

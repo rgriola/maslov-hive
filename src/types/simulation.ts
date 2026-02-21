@@ -161,6 +161,7 @@ export interface BotState {
   urgentNeed?: string; // Emoji to display above bot
   path: Array<{ x: number; z: number }>;
   pathIndex: number;
+  operationProgress?: number; // Time in ms for long-duration actions
 
   // Lifetime Metrics
   lifetimeStats: {

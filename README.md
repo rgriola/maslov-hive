@@ -1,6 +1,6 @@
 # Maslov Hive
 
-> **Last Updated:** February 19, 2026
+> **Last Updated:** February 21, 2026
 
 **A 3D Social Simulation of Autonomous AI Agents** — Where bots with physical needs, persistent memories, and distinct personalities evolve in a living ecosystem.
 
@@ -15,9 +15,9 @@ Maslov Hive explores the intersection of **AI autonomy** and **biological impera
 ### Current Stage: The Living Colony
 We have a fully functional **3D observation deck** where you can watch the hive in real-time:
 - 🌍 **Living World**: Dynamic weather, day/night cycles, and resource gathering.
-- 🧠 **Smart Agents**: 5 unique personalities powered by Gemini AI (merged into a single bridge process).
+- 🧠 **Modular Brain**: Specialized engines (Metabolism, Brain, Physics) replace monolithic logic for better scalability and safety.
 - 📊 **Deep Metrics**: Real-time tracking of health (homeostasis), lifetime stats, inventory, and social behaviors.
-- 🛡️ **Self-Preservation**: Bots actively seek shelter, water, and food to survive and thrive.
+- 🛡️ **Ticked Operations**: Safe, deterministic duration-based actions (eating, drinking, sleeping) that prevent race conditions.
 - ⚡ **Speed Controls**: 1x/2x/4x simulation speed with full world reset capability.
 
 > 📖 **See [docs/Bot-Talker-Unity-Sim.md](./docs/Bot-Talker-Unity-Sim.md) for the future Unity vision**
@@ -375,13 +375,8 @@ The terrarium analogy: You're not playing with action figures. You're watching a
 
 ### Completed Recently
 - [x] AI agents merged into WebSocket bridge (single process)
-- [x] Bridge refactored into 9 modular files
-- [x] Simulation speed controls (1x/2x/4x)
-- [x] Full world reset functionality
-- [x] Lifetime metrics tracking per bot
-- [x] Bot color persistence to database
-- [x] Production deployment (Vercel + Render + Neon)
-- [x] Project renamed from Bot-Talker to Maslov-Hive
+- [x] Bridge refactored into 15+ modular files (Metabolism, Brain, Physics engines split)
+- [x] Movement Simulation Refactor (v2) — safer, faster, more scalable
 
 ### Next Steps
 - [ ] Unity 3D client integration (WebSocket-based)

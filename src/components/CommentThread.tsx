@@ -1,7 +1,7 @@
 /**
  * CommentThread — shared comment list component.
  * Renders PostComment[] with agent name links, optional avatars, dates,
- * and renderContentWithLinks. Used by dashboard, bot profile, and simulation.
+ * and renderContentWithLinks. Used by dashboard and PostDetailPanel (simulation).
  * Refactored: 2026-02-21 — Phase 3 shared UI components
  */
 

@@ -13,12 +13,12 @@ import {
   randomBotWidth,
   randomBotHeight,
   randomBotShape,
-  detectPersonality,
-} from '../../src/lib/world-physics';
+} from '../../src/lib/bot-factory';
+import { detectPersonality } from '../../src/config/bot-visuals';
 import { BotState } from '../../src/types/simulation';
 import { BotAgent } from '../bot-agent-base';
 import { PrismaConnector } from '../connectors/prisma-connector';
-import { Personality, PERSONAS } from '../config';
+import { Personality } from '../config';
 
 import {
   prisma,
@@ -29,6 +29,7 @@ import {
   ENABLE_AI_AGENTS,
   SQ_METERS_PER_BOT,
   MIN_GROUND_SIZE,
+  WOOD_REQUIRED,
 } from './state';
 import { broadcast } from './broadcast';
 import { createNeedsTracker, createLifetimeStats } from './helpers';
@@ -148,33 +149,62 @@ export async function initializeBots() {
     );
     worldConfig.groundRadius = Math.round(groundSide / 2);
 
-    // Create randomized resource spots
+    // Create randomized resource spots (spaced ≥1m apart, no overlaps)
     const innerRadius = 2.9;
     const outerRadius = worldConfig.groundRadius;
+    const MIN_GAP = 1; // minimum 1m between edges of any two resource circles
+    const MAX_PLACEMENT_ATTEMPTS = 200;
 
-    const getRandomPos = (radius: number) => {
+    const placed: { x: number; z: number; radius: number }[] = [];
+
+    const getSpacedPos = (radius: number): { x: number; z: number } => {
+      for (let attempt = 0; attempt < MAX_PLACEMENT_ATTEMPTS; attempt++) {
+        const angle = Math.random() * Math.PI * 2;
+        const maxDist = outerRadius - radius * 0.8;
+        const minDist = innerRadius + radius * 1.0;
+        const dist = minDist + Math.random() * (maxDist - minDist);
+        const x = Math.cos(angle) * dist;
+        const z = Math.sin(angle) * dist;
+
+        // Check that edges are at least MIN_GAP apart from every placed resource
+        const tooClose = placed.some((p) => {
+          const dx = x - p.x;
+          const dz = z - p.z;
+          const centerDist = Math.sqrt(dx * dx + dz * dz);
+          return centerDist < radius + p.radius + MIN_GAP;
+        });
+
+        if (!tooClose) {
+          placed.push({ x, z, radius });
+          return { x, z };
+        }
+      }
+      // Fallback: place anyway and warn
+      console.warn(`   ⚠️ Could not find non-overlapping spot for resource (r=${radius}) after ${MAX_PLACEMENT_ATTEMPTS} attempts`);
       const angle = Math.random() * Math.PI * 2;
-      const maxDist = outerRadius - radius * 0.8;
-      const minDist = innerRadius + radius * 1.0;
-      const dist = minDist + Math.random() * (maxDist - minDist);
-      return { x: Math.cos(angle) * dist, z: Math.sin(angle) * dist };
+      const dist = (innerRadius + outerRadius) / 2;
+      const pos = { x: Math.cos(angle) * dist, z: Math.sin(angle) * dist };
+      placed.push({ ...pos, radius });
+      return pos;
     };
 
-    // 1. Water spot (lake)
-    const waterPos = getRandomPos(3);
+    // Place largest first for best packing
+    // 1. Water spot (lake) — largest, r=3
+    const waterPos = getSpacedPos(3);
     worldConfig.waterSpots = [{ x: waterPos.x, z: waterPos.z, radius: 3 }];
 
-    // 2. Food spot
-    const foodPos = getRandomPos(1.5);
-    worldConfig.foodSpots = [{ x: foodPos.x, z: foodPos.z, radius: 1.5 }];
+    // 2. Wood spot (forest) — r=2.5
+    const woodPos = getSpacedPos(2.5);
+    worldConfig.woodSpots = [{ x: woodPos.x, z: woodPos.z, radius: 2.5, available: WOOD_REQUIRED, maxAvailable: WOOD_REQUIRED }];
 
-    // 3. Wood spot (forest)
-    const woodPos = getRandomPos(2.5);
-    worldConfig.woodSpots = [{ x: woodPos.x, z: woodPos.z, radius: 2.5, available: 100 }];
-
-    // 4. Stone spot (quarry)
-    const stonePos = getRandomPos(2);
+    // 3. Stone spot (quarry) — r=2
+    const stonePos = getSpacedPos(2);
     worldConfig.stoneSpots = [{ x: stonePos.x, z: stonePos.z, radius: 2, available: 100 }];
+
+    // 4. Food spot — smallest, r=1.5 (enough food for 2 bots)
+    const FOOD_PER_SPOT = 2;
+    const foodPos = getSpacedPos(1.5);
+    worldConfig.foodSpots = [{ x: foodPos.x, z: foodPos.z, radius: 1.5, available: FOOD_PER_SPOT, maxAvailable: FOOD_PER_SPOT }];
 
     // Initialize empty shelters array
     worldConfig.shelters = [];

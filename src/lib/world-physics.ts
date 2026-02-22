@@ -1,10 +1,13 @@
-import { WorldConfig } from '@/types/simulation';
-import { BOT_PHYSICS } from '@/config/simulation';
+/**
+ * Collision detection — checks whether a world position is walkable.
+ * Bot factory utils moved to src/lib/bot-factory.ts (Phase 5).
+ * detectPersonality moved to src/config/bot-visuals.ts (Phase 5).
+ */
 
-// ─── Collision Detection ─────────────────────────────────────────
+import { WorldConfig } from '@/types/simulation';
 
 /**
- * Check if a world position is walkable (not blocked by obstacles)
+ * Check if a world position is walkable (not blocked by obstacles).
  */
 export function isWalkable(x: number, z: number, botRadius: number, config: WorldConfig): boolean {
     const padding = botRadius + 0.15;
@@ -19,7 +22,6 @@ export function isWalkable(x: number, z: number, botRadius: number, config: Worl
     }
 
     // Check shelter collisions
-    // config.shelters is strictly ShelterData[] now
     for (const shelter of config.shelters) {
         if (!shelter.built) continue;
         const shelterHalfSize = 0.5;
@@ -37,46 +39,4 @@ export function isWalkable(x: number, z: number, botRadius: number, config: Worl
     }
 
     return true;
-}
-
-// ─── Math & Randomization ────────────────────────────────────────
-
-export function random256Color(): string {
-    // 216 web-safe colors (6×6×6 cube) + 40 grays = 256
-    const r = Math.floor(Math.random() * 6) * 51; // 0,51,102,153,204,255
-    const g = Math.floor(Math.random() * 6) * 51;
-    const b = Math.floor(Math.random() * 6) * 51;
-    return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
-}
-
-/** Available bot geometry types */
-export const BOT_SHAPES = ['box', 'sphere', 'cone', 'cylinder'] as const;
-export type BotShape = typeof BOT_SHAPES[number];
-
-/** Pick a random geometry shape for a bot */
-export function randomBotShape(): BotShape {
-    return BOT_SHAPES[Math.floor(Math.random() * BOT_SHAPES.length)];
-}
-
-export function randomBotWidth(): number {
-    return BOT_PHYSICS.MIN_WIDTH + Math.random() * (BOT_PHYSICS.MAX_WIDTH - BOT_PHYSICS.MIN_WIDTH);
-}
-
-export function randomBotHeight(): number {
-    return BOT_PHYSICS.MIN_HEIGHT + Math.random() * (BOT_PHYSICS.MAX_HEIGHT - BOT_PHYSICS.MIN_HEIGHT);
-}
-
-// ─── Personality Detection ───────────────────────────────────────
-
-export function detectPersonality(name: string): string {
-    const lower = name.toLowerCase();
-    if (lower.includes('tech')) return 'tech';
-    if (lower.includes('philo')) return 'philo';
-    if (lower.includes('art')) return 'art';
-    if (lower.includes('science')) return 'science';
-    if (lower.includes('pirate')) return 'pirate';
-    // Fallback: hash the name to pick a type
-    const types = ['tech', 'philo', 'art', 'science', 'pirate'];
-    const hash = name.split('').reduce((acc, c) => acc + c.charCodeAt(0), 0);
-    return types[hash % types.length];
 }

@@ -118,7 +118,7 @@ function evaluateHeroNeeds(bot: BotState): boolean {
 }
 
 function evaluateWaterNeeds(bot: BotState, urgentNeed: any): boolean {
-    if (urgentNeed.need !== 'water' || bot.state === 'seeking-water') return false;
+    if (urgentNeed.need !== 'water' || bot.state === 'seeking-water' || bot.state === 'drinking') return false;
 
     if (bot.needs!.water < 60 && bot.inventory.water > 0) {
         bot.inventory.water--;
@@ -126,6 +126,20 @@ function evaluateWaterNeeds(bot: BotState, urgentNeed: any): boolean {
         bot.needs = fulfillNeed(bot.needs!, 'water', 40);
         broadcastNeedsPost(bot, 'inventory-water');
         return true;
+    }
+
+    // If already at the water spot, start drinking immediately
+    if (bot.needs!.water < 60) {
+        for (const water of worldConfig.waterSpots) {
+            const dx = bot.x - water.x;
+            const dz = bot.z - water.z;
+            const dist = Math.sqrt(dx * dx + dz * dz);
+            if (dist < water.radius) {
+                transitionState(bot, 'drinking');
+                broadcastNeedsPost(bot, 'drinking');
+                return true;
+            }
+        }
     }
 
     if (bot.needs!.water < 30) {
@@ -155,11 +169,24 @@ function evaluateFoodNeeds(bot: BotState, urgentNeed: any): boolean {
     }
 
     if (bot.needs!.food < 25) {
-        const food = worldConfig.foodSpots[0];
+        // Find the nearest food spot with food available
+        let bestFood = null;
+        let bestDist = Infinity;
+        for (const f of worldConfig.foodSpots) {
+            if (f.available < 1 || f.growing) continue; // must have at least 1 full unit & fully grown
+            const dx = bot.x - f.x;
+            const dz = bot.z - f.z;
+            const dist = Math.sqrt(dx * dx + dz * dz);
+            if (dist < bestDist) {
+                bestDist = dist;
+                bestFood = f;
+            }
+        }
+        if (!bestFood) return false; // no food available anywhere
         const angle = Math.random() * Math.PI * 2;
-        const dist = Math.random() * (food.radius * 0.7);
-        bot.targetX = food.x + Math.cos(angle) * dist;
-        bot.targetZ = food.z + Math.sin(angle) * dist;
+        const dist = Math.random() * (bestFood.radius * 0.7);
+        bot.targetX = bestFood.x + Math.cos(angle) * dist;
+        bot.targetZ = bestFood.z + Math.sin(angle) * dist;
         bot.path = [];
         transitionState(bot, 'seeking-food');
         broadcastNeedsPost(bot, 'seeking-food');

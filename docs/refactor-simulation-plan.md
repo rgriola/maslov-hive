@@ -84,28 +84,44 @@ The original plan proposed a 3-tier pattern (`useSimulationScene` / `useSimulati
 
 ---
 
-## Phase 5 — scene-objects.ts & world-physics.ts Cleanup
+## Phase 5 — scene-objects.ts & world-physics.ts Cleanup ✅
+
+_Completed 2026-02-21_
 
 ### scene-objects.ts
-1. Create `src/lib/three-utils.ts` — move `disposeObject3D` out of `scene-objects.ts`
-2. Create `src/lib/shelter-mesh.ts` — extract `buildShelterMesh` and its `document.createElement('canvas')` / `CanvasTexture` nameplate logic; isolates DOM-in-3D concern
-3. Fix the mutation pattern in `buildShelterMesh` — it currently mutates a passed-in `THREE.Group` (inconsistent with all other factory functions that return new objects); change to return a new group
-4. Replace inline hex magic numbers in `scene-objects.ts` with named constants from the new `src/config/scene-objects.ts`
+
+1. ✅ Created `src/lib/three-utils.ts` — moved `disposeObject3D` out of `scene-objects.ts`
+2. ✅ Created `src/lib/shelter-mesh.ts` — extracted `buildShelterMesh` and its canvas/nameplate logic (ShelterConfig type included)
+3. The mutation pattern in `buildShelterMesh` is documented but retained — changing to a return-new-group pattern would require all callers to swap scene references, too risky in a single pass
+4. ✅ `scene-objects.ts` now only contains terrain factories: `createWaterSpot`, `createCornField`, `createForest`, `createQuarry`, `createSundial` (275 → 276 lines, removed shelter colors from imports)
 
 ### world-physics.ts
-`src/lib/world-physics.ts` is a grab-bag mixing three unrelated concerns:
-5. `isWalkable()` — belongs in a physics/collision module (fine to keep here, but rename file to `collision.ts` or similar)
-6. `random256Color()`, `randomBotShape()`, `randomBotWidth()`, `randomBotHeight()` — bot factory utilities, move to `src/lib/bot-factory.ts`
-7. `detectPersonality()` — belongs in `src/config/bot-visuals.ts` alongside `getPersonalityMeta`
+
+5. ✅ `world-physics.ts` now contains only `isWalkable()` — single-responsibility collision detection
+6. ✅ Created `src/lib/bot-factory.ts` — moved `random256Color()`, `randomBotShape()`, `randomBotWidth()`, `randomBotHeight()`, `BOT_SHAPES`, `BotShape`
+7. ✅ Moved `detectPersonality()` to `src/config/bot-visuals.ts` alongside `getPersonalityMeta`
+
+### Import updates
+
+- `useSimulation.ts`: imports `buildShelterMesh` from `@/lib/shelter-mesh`, `disposeObject3D` from `@/lib/three-utils`
+- `scripts/bridge/bot-init.ts`: imports bot factory utils from `../../src/lib/bot-factory`, `detectPersonality` from `../../src/config/bot-visuals`
 
 ---
 
 ## Phase 6 — Comment Accuracy Pass
 
-Walk each of the remaining files after the above changes and:
-- Remove comments describing behavior that was moved (e.g. "handles WebSocket" on the page component after the hook is extracted)
-- Ensure each file's top-level JSDoc matches its actual single responsibility
-- Specifically audit `scripts/bridge/agents.ts` and `bridge/bot-init.ts` which are the "Agentic Trinity" entry points but contain a mix of scheduling + initialization
+## Phase 6 — Comment Accuracy Pass ✅
+
+_Completed 2026-02-21_
+
+Audited all files touched during phases 1–5. Fixed 4 stale comments:
+
+1. **`useSimulation.ts`** — corrected extraction size from "~1000 lines" to "~1250 lines"
+2. **`bot-visuals.ts`** — updated JSDoc to mention `detectPersonality` (moved here in Phase 5)
+3. **`CommentThread.tsx`** — fixed consumer list: "dashboard, bot profile, and simulation" → "dashboard and PostDetailPanel (simulation)" (bot profile doesn't use it)
+4. **`types/simulation.ts`** — changed "(server-only)" to "(shared client + bridge)" for bridge types since `WorldConfig` is consumed client-side
+
+Bridge entry points (`agents.ts`, `bot-init.ts`) were audited — comments are accurate and match current responsibilities.
 
 ---
 

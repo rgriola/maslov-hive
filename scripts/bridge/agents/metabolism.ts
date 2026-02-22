@@ -8,25 +8,22 @@ import { BotState } from '../../../src/types/simulation';
 import {
     decayNeeds,
     fulfillNeed,
-    getMostUrgentNeed,
-    isInCriticalCondition,
 } from '../../bot-needs';
-import { getTemperatureModifier, getAQIModifier } from '../weather';
 import { broadcastNeedsPost } from '../needs-posts';
 import { bridgeState } from '../state';
 
 /**
  * Constants for metabolism rates
  */
-const BASE_HOMEOSTASIS_DECAY = 2;
 const LABOR_MULTIPLIER = 2.5;
-const SLEEPING_HOMEOSTASIS_RECOVERY = 8.0;
 const PASSIVE_BREATHING_RECOVERY = 40.0;
-const CLOTHING_DECAY_RATE = 0.5;
-const HOMEOSTASIS_CRITICAL_DECAY = 2.0;
+const CLOTHING_HARSH_WEATHER_DECAY = 0.5;  // extra clothing decay in extreme temps
 
 /**
  * Ticks the metabolism for a single bot.
+ * 
+ * Homeostasis (health) is DERIVED — it reflects how well the bot's core
+ * needs (water, food, sleep) are met. It does NOT have independent decay.
  * 
  * @param bot The bot state to update
  * @param dt Delta time in milliseconds
@@ -40,48 +37,57 @@ export function tickMetabolism(bot: BotState, dt: number) {
     // Only update if a meaningful amount of time has passed
     if (elapsedMinutes <= 0.001) return;
 
-    const tempMod = getTemperatureModifier();
-    const aqiMod = getAQIModifier();
-
     const isLaboring = ['gathering-wood', 'gathering-stone', 'building-shelter'].includes(bot.state);
     const laborMultiplier = isLaboring ? LABOR_MULTIPLIER : 1.0;
     const isSleeping = bot.state === 'sleeping';
 
-    // 1. Core Decay
+    // 1. Core Decay — water, food, sleep decay; shelter & clothing only decay when exposed
     bot.needs = decayNeeds(bot.needs, elapsedMinutes, {
-        homeostasis: BASE_HOMEOSTASIS_DECAY * tempMod * aqiMod,
+        homeostasis: 0,  // NO independent decay — derived below
         water: isSleeping ? 0 : 100 * laborMultiplier,
         food: isSleeping ? 0 : 50 * laborMultiplier,
+        shelter: 0,   // shelter only decays if bot has no shelter (handled below)
+        clothing: 0,  // clothing only decays in harsh weather (handled below)
     });
 
-    // 2. Passive Recovery: "Stable" & "Thriving"
-    if (bot.needs.water > 40 && bot.needs.food > 40 && bot.needs.sleep > 40 &&
-        bot.needs.clothing > 20 && bot.needs.shelter > 20) {
-        bot.needs = fulfillNeed(bot.needs, 'homeostasis', 1 * elapsedMinutes);
-    }
-
-    if (bot.needs.water > 60 && bot.needs.food > 60 && bot.needs.sleep > 60) {
-        bot.needs = fulfillNeed(bot.needs, 'homeostasis', 5 * elapsedMinutes);
-    }
-
-    // 3. Air: passive breathing (auto-restore)
+    // 2. Air: passive breathing (auto-restore)
     bot.needs = fulfillNeed(bot.needs, 'air', PASSIVE_BREATHING_RECOVERY * elapsedMinutes);
 
-    // 4. Homeostasis modulation
-    if (isInCriticalCondition(bot.needs)) {
-        // Accelerate decay when other needs are critical
-        bot.needs.homeostasis = Math.max(0, bot.needs.homeostasis - HOMEOSTASIS_CRITICAL_DECAY * elapsedMinutes);
+    // 3. Shelter: decays only if bot has no built shelter
+    const hasShelter = bot.isInside;
+    if (!hasShelter) {
+        // Slow decay when outdoors (0.5/min — takes 3+ hours to deplete from 100)
+        bot.needs.shelter = Math.max(0, bot.needs.shelter - 0.5 * elapsedMinutes);
     }
 
-    if (isSleeping && !isInCriticalCondition(bot.needs)) {
-        // Faster recovery during sleep if not in distress
-        bot.needs = fulfillNeed(bot.needs, 'homeostasis', SLEEPING_HOMEOSTASIS_RECOVERY * elapsedMinutes);
-    }
-
-    // 5. Clothing: decays faster in harsh weather
+    // 4. Clothing: only decays in harsh weather
     if (bridgeState.currentTemperature < 10 || bridgeState.currentTemperature > 30) {
-        bot.needs.clothing = Math.max(0, bot.needs.clothing - CLOTHING_DECAY_RATE * elapsedMinutes);
+        bot.needs.clothing = Math.max(0, bot.needs.clothing - CLOTHING_HARSH_WEATHER_DECAY * elapsedMinutes);
     }
+
+    // 5. Homeostasis = DERIVED HEALTH — weighted average of core needs
+    //    Reflects how well the bot is doing overall. No separate decay.
+    const coreNeeds = [
+        { value: bot.needs.water, weight: 3 },   // most critical
+        { value: bot.needs.food,  weight: 3 },   // most critical
+        { value: bot.needs.sleep, weight: 2 },   // important
+        { value: bot.needs.air,   weight: 1 },   // usually fine
+        { value: bot.needs.shelter,  weight: 0.5 },
+        { value: bot.needs.clothing, weight: 0.5 },
+    ];
+    const totalWeight = coreNeeds.reduce((sum, n) => sum + n.weight, 0);
+    const weightedAvg = coreNeeds.reduce((sum, n) => sum + n.value * n.weight, 0) / totalWeight;
+
+    // Smooth transition — move homeostasis toward the target at ~5 points/min
+    const target = weightedAvg;
+    const diff = target - bot.needs.homeostasis;
+    const maxChange = 5 * elapsedMinutes; // 5 pts/min convergence speed
+    if (Math.abs(diff) < maxChange) {
+        bot.needs.homeostasis = target;
+    } else {
+        bot.needs.homeostasis += Math.sign(diff) * maxChange;
+    }
+    bot.needs.homeostasis = Math.max(0, Math.min(100, bot.needs.homeostasis));
 
     // 6. Critical Distress Alerts
     if (bot.needs.water < 20) broadcastNeedsPost(bot, 'critical-water');

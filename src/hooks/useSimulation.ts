@@ -1,7 +1,7 @@
 /**
  * useSimulation — core simulation hook managing Three.js scene, WebSocket,
  * animation loop, bot entities, and all associated state.
- * Extracted from simulation/page.tsx (~1000 lines) to reduce page to ~250 lines.
+ * Extracted from simulation/page.tsx (~1250 lines) to reduce page to ~320 lines.
  * Refactored: 2026-02-21 — Phase 4 hook extraction
  */
 
@@ -49,9 +49,9 @@ import {
   createForest,
   createQuarry,
   createSundial,
-  buildShelterMesh,
-  disposeObject3D,
 } from '@/lib/scene-objects';
+import { buildShelterMesh } from '@/lib/shelter-mesh';
+import { disposeObject3D } from '@/lib/three-utils';
 
 // ─── Interface ──────────────────────────────────────────────────
 
@@ -118,9 +118,10 @@ export function useSimulation({
   const cloudParticlesRef = useRef<THREE.Points | null>(null);
   const waterSpotsRef = useRef<THREE.Mesh[]>([]);
   const foodSpotsRef = useRef<THREE.Object3D[]>([]);
-  const cornTargetScaleRef = useRef<number>(1);
+  const foodScaleTargetsRef = useRef<number[]>([]);
   const cornInitializedRef = useRef<boolean>(false);
   const woodSpotsRef = useRef<THREE.Object3D[]>([]);
+  const woodScaleTargetsRef = useRef<number[]>([]);
   const stoneSpotsRef = useRef<THREE.Object3D[]>([]);
   const sheltersRef = useRef<Map<string, THREE.Group>>(new Map());
   const sundialRef = useRef<THREE.Object3D | null>(null);
@@ -259,14 +260,15 @@ export function useSimulation({
       disposeObject3D(obj);
     });
     foodSpotsRef.current = [];
+    foodScaleTargetsRef.current = [];
     cornInitializedRef.current = false;
-    cornTargetScaleRef.current = 1;
 
     woodSpotsRef.current.forEach(obj => {
       if (sceneRef.current) sceneRef.current.remove(obj);
       disposeObject3D(obj);
     });
     woodSpotsRef.current = [];
+    woodScaleTargetsRef.current = [];
     woodInitializedRef.current = false;
 
     stoneSpotsRef.current.forEach(obj => {
@@ -790,13 +792,25 @@ export function useSimulation({
         snowGeometry.attributes.position.needsUpdate = true;
       }
 
-      // Corn field animation
-      for (const cornGroup of foodSpotsRef.current) {
-        const currentScale = cornGroup.scale.x;
-        const targetScale = cornTargetScaleRef.current;
-        if (Math.abs(currentScale - targetScale) > 0.01) {
-          const newScale = currentScale + (targetScale - currentScale) * 0.05;
+      // Corn field (food) scaling animation — shrinks as food is consumed, grows for new spots
+      for (let i = 0; i < foodSpotsRef.current.length; i++) {
+        const cornGroup = foodSpotsRef.current[i];
+        const target = foodScaleTargetsRef.current[i] ?? 1;
+        const current = cornGroup.scale.x;
+        if (Math.abs(current - target) > 0.005) {
+          const newScale = current + (target - current) * 0.03;
           cornGroup.scale.set(newScale, newScale, newScale);
+        }
+      }
+
+      // Forest (wood) scaling animation — shrinks as wood is taken, grows for new spots
+      for (let i = 0; i < woodSpotsRef.current.length; i++) {
+        const forestGroup = woodSpotsRef.current[i];
+        const target = woodScaleTargetsRef.current[i] ?? 1;
+        const current = forestGroup.scale.x;
+        if (Math.abs(current - target) > 0.005) {
+          const newScale = current + (target - current) * 0.03;
+          forestGroup.scale.set(newScale, newScale, newScale);
         }
       }
 
@@ -940,23 +954,70 @@ export function useSimulation({
                   });
                 }
 
-                if (msg.data.worldConfig.foodSpots && !cornInitializedRef.current) {
-                  cornInitializedRef.current = true;
-                  msg.data.worldConfig.foodSpots.forEach((spot: { x: number; z: number; radius: number }) => {
+                if (msg.data.worldConfig.foodSpots) {
+                  const serverFoodSpots: Array<{ x: number; z: number; radius: number; available: number; maxAvailable: number }> = msg.data.worldConfig.foodSpots;
+
+                  // Remove excess visuals if server has fewer spots (old depleted spots removed)
+                  while (foodSpotsRef.current.length > serverFoodSpots.length) {
+                    const removed = foodSpotsRef.current.pop()!;
+                    scene.remove(removed);
+                    foodScaleTargetsRef.current.pop();
+                  }
+
+                  // Create visuals for any new food spots
+                  while (foodSpotsRef.current.length < serverFoodSpots.length) {
+                    const idx = foodSpotsRef.current.length;
+                    const spot = serverFoodSpots[idx];
                     const cornGroup = createCornField(spot);
+                    const initialScale = spot.maxAvailable > 0 ? spot.available / spot.maxAvailable : 0;
+                    cornGroup.scale.set(initialScale, initialScale, initialScale);
                     scene.add(cornGroup);
                     foodSpotsRef.current.push(cornGroup);
-                  });
-                  cornTargetScaleRef.current = 1;
+                    foodScaleTargetsRef.current.push(initialScale);
+                  }
+                  cornInitializedRef.current = true;
+
+                  // Update positions and scale targets for all spots
+                  for (let i = 0; i < serverFoodSpots.length; i++) {
+                    const spot = serverFoodSpots[i];
+                    const obj = foodSpotsRef.current[i];
+                    // Update position in case spot was replaced
+                    if (obj && (Math.abs(obj.position.x - spot.x) > 0.1 || Math.abs(obj.position.z - spot.z) > 0.1)) {
+                      scene.remove(obj);
+                      const newCorn = createCornField(spot);
+                      const s = spot.maxAvailable > 0 ? Math.max(0.01, spot.available / spot.maxAvailable) : 1;
+                      newCorn.scale.set(s, s, s);
+                      scene.add(newCorn);
+                      foodSpotsRef.current[i] = newCorn;
+                    }
+                    const scale = spot.maxAvailable > 0 ? Math.max(0.05, spot.available / spot.maxAvailable) : 1;
+                    foodScaleTargetsRef.current[i] = scale;
+                  }
                 }
 
-                if (msg.data.worldConfig.woodSpots && !woodInitializedRef.current) {
-                  woodInitializedRef.current = true;
-                  msg.data.worldConfig.woodSpots.forEach((spot: { x: number; z: number; radius: number }) => {
+                if (msg.data.worldConfig.woodSpots) {
+                  const serverSpots: Array<{ x: number; z: number; radius: number; available: number; maxAvailable: number }> = msg.data.worldConfig.woodSpots;
+
+                  // Create visuals for any new wood spots
+                  while (woodSpotsRef.current.length < serverSpots.length) {
+                    const idx = woodSpotsRef.current.length;
+                    const spot = serverSpots[idx];
                     const forestGroup = createForest(spot);
+                    // New growing spots start at scale 0
+                    const initialScale = spot.available / spot.maxAvailable;
+                    forestGroup.scale.set(initialScale, initialScale, initialScale);
                     scene.add(forestGroup);
                     woodSpotsRef.current.push(forestGroup);
-                  });
+                    woodScaleTargetsRef.current.push(initialScale);
+                  }
+                  woodInitializedRef.current = true;
+
+                  // Update scale targets based on available wood
+                  for (let i = 0; i < serverSpots.length; i++) {
+                    const spot = serverSpots[i];
+                    const scale = Math.max(0.05, spot.available / spot.maxAvailable);
+                    woodScaleTargetsRef.current[i] = scale;
+                  }
                 }
 
                 if (msg.data.worldConfig.stoneSpots && !stoneInitializedRef.current) {
@@ -1025,12 +1086,7 @@ export function useSimulation({
                   }
                 }
 
-                const anyBotEating = msg.data.bots.some((b: { state: string }) => b.state === 'eating');
-                if (anyBotEating) {
-                  cornTargetScaleRef.current = 0.2;
-                } else if (cornInitializedRef.current) {
-                  cornTargetScaleRef.current = 1;
-                }
+                // Food scaling is now driven by available/maxAvailable in the foodSpots handler above
               }
               break;
 

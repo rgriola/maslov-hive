@@ -1,9 +1,8 @@
 'use client';
 /**
- * Visual configuration for bots in 3D scene.
- * Geometry and color are now randomized per-bot at spawn time.
- * Refactored: 2026-02-17 @ random geometry + color
- * Refactored: 2026-02-19 @ added 'use client' for Turbopack Three.js resolution
+ * Visual configuration and personality detection for bots.
+ * Geometry and color are randomized per-bot at spawn time.
+ * `detectPersonality` moved here from world-physics.ts (Phase 5).
  */
 
 import * as THREE from 'three';
@@ -45,6 +44,24 @@ export function getPersonalityMeta(nameOrKey: string): { emoji: string; label: s
   if (key) return PERSONALITY_META[key];
 
   return { emoji: '🤖', label: 'Unknown' };
+}
+
+/**
+ * Detect a bot's personality type from its name.
+ * Looks for known keywords; falls back to a deterministic hash.
+ * Moved from world-physics.ts (Phase 5).
+ */
+export function detectPersonality(name: string): string {
+  const lower = name.toLowerCase();
+  if (lower.includes('tech')) return 'tech';
+  if (lower.includes('philo')) return 'philo';
+  if (lower.includes('art')) return 'art';
+  if (lower.includes('science')) return 'science';
+  if (lower.includes('pirate')) return 'pirate';
+  // Fallback: hash the name to pick a type
+  const types = ['tech', 'philo', 'art', 'science', 'pirate'];
+  const hash = name.split('').reduce((acc, c) => acc + c.charCodeAt(0), 0);
+  return types[hash % types.length];
 }
 
 /**

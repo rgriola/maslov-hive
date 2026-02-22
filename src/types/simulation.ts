@@ -5,7 +5,7 @@
  * Types have been separated by concern:
  *   @/types/weather  — WeatherData, AirQualityData
  *   @/types/scene    — BotEntity (Three.js-coupled)
- *   @/types/bridge   — NavNode, BotState, WorldConfig (server-only)
+ *   @/types/bridge   — NavNode, BotState, WorldConfig (shared client + bridge)
  *   @/types/post     — Post, PostComment, Agent (shared across pages)
  *   @/types/simulation — (this file) UI-facing simulation types
  */

@@ -1,6 +1,6 @@
 /**
- * Server/bridge-only types used by the simulation engine in scripts/bridge/.
- * Not consumed by client-side UI components.
+ * Types shared between the bridge simulation engine (scripts/bridge/) and the client.
+ * Re-exported from @/types/simulation — client code should import from there, not here.
  * Refactored: 2026-02-21 — Phase 1 types extraction
  */
 
@@ -98,8 +98,8 @@ export interface WorldConfig {
   groundRadius: number;
   botCount: number;
   waterSpots: Array<{ x: number; z: number; radius: number }>;
-  foodSpots: Array<{ x: number; z: number; radius: number }>;
-  woodSpots: Array<{ x: number; z: number; radius: number; available: number }>;
+  foodSpots: Array<{ x: number; z: number; radius: number; available: number; maxAvailable: number; growing?: boolean }>;
+  woodSpots: Array<{ x: number; z: number; radius: number; available: number; maxAvailable: number; growing?: boolean }>;
   stoneSpots: Array<{ x: number; z: number; radius: number; available: number }>;
   shelters: ShelterData[];
   sundial: { x: number; z: number; radius: number };

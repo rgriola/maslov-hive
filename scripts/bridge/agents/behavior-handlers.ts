@@ -5,12 +5,15 @@
  */
 
 import { BotState, WorldConfig, ShelterData } from '../../../src/types/simulation';
+
+type FoodSpot = WorldConfig['foodSpots'][number];
 import { fulfillNeed } from '../../bot-needs';
 import {
     WOOD_REQUIRED,
     STONE_REQUIRED,
     prisma,
-    bots
+    bots,
+    worldConfig
 } from '../state';
 import { broadcastNeedsPost } from '../needs-posts';
 
@@ -72,18 +75,29 @@ export const BehaviorHandlers: Record<string, BehaviorHandler> = {
             console.log(`🍶 ${bot.botName} is drinking!`);
         },
         onUpdate: (bot, worldConfig, dt) => {
-            handleRecoveryTick(bot, dt, 20000, 'water', 5, 'water', 5, 'waterRefillCount', 'finished-drinking');
+            handleRecoveryTick(bot, dt, 10000, 'water', 20, 'water', 5, 'waterRefillCount', 'finished-drinking');
         }
     },
 
     eating: {
         onEnter: (bot) => {
             bot.operationProgress = 0;
+            // Consume 1 unit from the nearest food spot
+            const food = worldConfig.foodSpots.find((f: FoodSpot) => {
+                const dx = bot.x - f.x;
+                const dz = bot.z - f.z;
+                return Math.sqrt(dx * dx + dz * dz) < f.radius + 1 && f.available >= 1 && !f.growing;
+            });
+            if (food) {
+                food.available--;
+                console.log(`🍴 ${bot.botName} is eating! (food spot: ${food.available}/${food.maxAvailable} remaining)`);
+            } else {
+                console.log(`🍴 ${bot.botName} is eating! (no food spot found nearby)`);
+            }
             broadcastNeedsPost(bot, 'eating');
-            console.log(`🍴 ${bot.botName} is eating!`);
         },
         onUpdate: (bot, worldConfig, dt) => {
-            handleRecoveryTick(bot, dt, 20000, 'food', 5, 'food', 3, 'foodRefillCount', 'finished-eating');
+            handleRecoveryTick(bot, dt, 10000, 'food', 6, 'food', 3, 'foodRefillCount', 'finished-eating');
         }
     },
 
@@ -130,7 +144,7 @@ export const BehaviorHandlers: Record<string, BehaviorHandler> = {
 
     'building-shelter': {
         onUpdate: (bot, worldConfig, dt) => {
-            const shelter = worldConfig.shelters.find(s => s.ownerId === bot.botId && !s.built);
+            const shelter = worldConfig.shelters.find((s: ShelterData) => s.ownerId === bot.botId && !s.built);
             if (!shelter) { bot.state = 'idle'; return; }
 
             const dist = Math.sqrt(Math.pow(bot.x - shelter.x, 2) + Math.pow(bot.z - shelter.z, 2));
@@ -216,7 +230,8 @@ export const BehaviorHandlers: Record<string, BehaviorHandler> = {
     },
 
     'seeking-to-help': {
-        onUpdate: (bot, worldConfig) => {
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        onUpdate: (bot, _worldConfig) => {
             const neighbor = bots.get(bot.helpingTargetId || '');
             if (!neighbor || !neighbor.needs) { bot.state = 'idle'; return; }
 
@@ -256,18 +271,32 @@ export const BehaviorHandlers: Record<string, BehaviorHandler> = {
 
     'seeking-food': {
         onUpdate: (bot, worldConfig) => {
-            const food = worldConfig.foodSpots[0];
-            const dist = Math.sqrt(Math.pow(bot.x - food.x, 2) + Math.pow(bot.z - food.z, 2));
-            if (dist < food.radius) {
+            // Find the nearest food spot with food available
+            let nearestFood = null;
+            let nearestDist = Infinity;
+            for (const food of worldConfig.foodSpots) {
+                if (food.available < 1 || food.growing) continue; // must be fully grown with food
+                const dx = bot.x - food.x;
+                const dz = bot.z - food.z;
+                const dist = Math.sqrt(dx * dx + dz * dz);
+                if (dist < nearestDist) {
+                    nearestDist = dist;
+                    nearestFood = food;
+                }
+            }
+            if (nearestFood && nearestDist < nearestFood.radius && nearestFood.available > 0) {
                 bot.state = 'eating';
                 BehaviorHandlers.eating.onEnter?.(bot);
+            } else if (!nearestFood || nearestFood.available <= 0) {
+                // No food available anywhere, go idle
+                bot.state = 'idle';
             }
         }
     },
 
     'seeking-shelter': {
         onUpdate: (bot, worldConfig) => {
-            const shelter = worldConfig.shelters.find(s => s.ownerId === bot.botId && s.built);
+            const shelter = worldConfig.shelters.find((s: ShelterData) => s.ownerId === bot.botId && s.built);
             if (!shelter) { bot.state = 'idle'; return; }
 
             const dist = Math.sqrt(Math.pow(bot.x - shelter.x, 2) + Math.pow(bot.z - shelter.z, 2));
@@ -279,7 +308,8 @@ export const BehaviorHandlers: Record<string, BehaviorHandler> = {
     },
 
     'seeking-partner': {
-        onUpdate: (bot, worldConfig) => {
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        onUpdate: (bot, _worldConfig) => {
             const partner = bots.get(bot.couplingPartnerId || '');
             if (!partner) { bot.state = 'idle'; return; }
 

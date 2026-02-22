@@ -23,21 +23,20 @@ export interface NeedDecayRates {
 }
 
 // Default decay rates (points per minute)
-// Default decay rates (points per minute)
 export const DEFAULT_DECAY_RATES: NeedDecayRates = {
-  water: 3,        // ~33 min to go from 100 to 0
-  food: 1.5,       // ~66 min to go from 100 to 0
-  sleep: 0.6,      // ~2.5 hours to go from 100 to 0
-  shelter: 0.1,    // Weather-dependent (restored during sleep)
-  clothing: 0.5,   // ~3 hours (restored during sleep in shelter)
-  homeostasis: 2,  // Slower decline
-  reproduction: 1, // ~1.5 hours cycle
+  water: 5,           // ~20 min from 100 to 0
+  food:  5,           // ~20 min from 100 to 0
+  sleep: 5,           // ~20 min from 100 to 0
+  shelter: 0,         // Only decays when outdoors (handled by metabolism)
+  clothing: 0,        // Only decays in harsh weather (handled by metabolism)
+  homeostasis: 0,     // DERIVED from other needs (handled by metabolism)
+  reproduction: 5,    // Social drive cycle
 };
 
 // Thresholds for seeking behavior (when need drops below this, bot seeks)
 export const NEED_THRESHOLDS = {
-  water: 30,
-  food: 25,
+  water: 35,
+  food: 30,
   sleep: 20,
   shelter: 15,
   clothing: 15,

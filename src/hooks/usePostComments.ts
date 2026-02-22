@@ -1,6 +1,6 @@
 /**
  * usePostComments — shared hook for fetching and caching post comments.
- * Eliminates the duplicated fetch/normalize pattern across dashboard, bot profile, and simulation.
+ * Shared fetch/normalize/cache pattern for post comments. Currently used by the bot profile page.
  * Refactored: 2026-02-21 — Phase 3 shared UI components
  */
 

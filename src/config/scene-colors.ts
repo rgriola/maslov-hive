@@ -1,6 +1,6 @@
 /**
  * Named color constants for 3D scene objects.
- * Centralizes the hex color values used across scene-objects.ts and simulation/page.tsx.
+ * Centralizes the hex color values used across scene-objects.ts, shelter-mesh.ts, and useSimulation.ts.
  *
  * Colors use the 0x format expected by Three.js MeshStandardMaterial.
  * For CSS/HTML contexts, use the CSS custom properties in globals.css instead.
